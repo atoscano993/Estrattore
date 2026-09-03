@@ -1,5 +1,5 @@
 import requests
-from flask import Flask
+from flask import Flask, Response
 
 app = Flask(__name__)
 
@@ -15,10 +15,10 @@ HEADERS = {
 def get_stream():
     try:
         response = requests.get(EMBED_URL, headers=HEADERS, timeout=10)
-        # Mostra il testo della pagina web direttamente a schermo
-        return f"<pre>{response.text[:2000]}</pre>"
+        # Ritorna l'HTML puro scaricato dal server per capire dove si nasconde il link
+        return Response(response.text, mimetype='text/plain')
     except Exception as e:
-        return str(e), 500
+        return f"Errore: {str(e)}", 500
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=8080)
