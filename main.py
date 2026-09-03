@@ -6,20 +6,26 @@ app = Flask(__name__)
 
 # Mappatura dei nomi personalizzati agli ID reali per i canali TVNOW
 TVNOW_MAP = {
-    "sportuno": "461",
-    "sportcalcio": "870",
-    "sportf1": "577",
-    "sportmoto": "575",
-    "sportmax": "460",
+    "sportuno": "461", 
+    "sportcalcio": "870", 
+    "sportf1": "577", 
+    "sportmoto": "575", 
+    "sportmax": "460", 
     "sporttennis": "576"
 }
 
-# Mappatura per i canali WideIPTV (aggiungiamo qui Sky Sport 24)
+# Mappatura per i canali WideIPTV
 WIDE_MAP = {
     "sport24": "SkySport24IT"
 }
 
-HEADERS = {
+HEADERS_TVNOW = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Referer": "https://tvnow247.top/",
+    "Origin": "https://tvnow247.top"
+}
+
+HEADERS_WIDE = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     "Referer": "https://htsport.org/",
     "Origin": "https://htsport.org"
@@ -34,27 +40,27 @@ def get_stream(channel_name):
         stream_id = TVNOW_MAP.get(name_clean, channel_name)
         try:
             api_url = f"https://chat.cfbu247.sbs/api/resolve-dlstream/{stream_id}"
-            response = requests.get(api_url, headers=HEADERS, timeout=10)
+            response = requests.get(api_url, headers=HEADERS_TVNOW, timeout=10)
             
             if response.status_code == 200:
                 data = response.json()
                 stream_url = data.get("m3u8") or data.get("proxyPlaylistUrl")
                 if stream_url:
                     return redirect(stream_url, code=302)
+            else:
+                print(f"Errore HTTP TVNOW: {response.status_code}")
         except Exception as e:
             print(f"Errore TVNOW: {e}")
 
-    # --- STRATEGIA 2: Canali WideIPTV (es. Sky Sport 24) ---
+    # --- STRATEGIA 2: Canali WideIPTV ---
     wide_slug = WIDE_MAP.get(name_clean, channel_name)
     try:
         player_url = f"https://wideiptv.top/player/{wide_slug}"
-        response = requests.get(player_url, headers=HEADERS, timeout=10)
+        response = requests.get(player_url, headers=HEADERS_WIDE, timeout=10)
         
         if response.status_code == 200:
-            # Cerca 'streamUrl: "https:\/\/..."' nella pagina HTML di wideiptv
             match = re.search(r'streamUrl:\s*["\']([^"\']+)["\']', response.text)
             if match:
-                # Converte i separatori \/ in / per avere un URL m3u8 valido
                 stream_url = match.group(1).replace(r'\/', '/')
                 return redirect(stream_url, code=302)
     except Exception as e:
