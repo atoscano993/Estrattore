@@ -6,17 +6,20 @@ app = Flask(__name__)
 
 # Mappatura dei nomi personalizzati agli ID reali per i canali TVNOW
 TVNOW_MAP = {
+    "sport24": "869",
     "sportuno": "461", 
     "sportcalcio": "870", 
     "sportf1": "577", 
     "sportmoto": "575", 
     "sportmax": "460", 
-    "sporttennis": "576"
+    "sporttennis": "576",
+    "sportarena": "462",
+    "dazn1": "877"
 }
 
 # Mappatura per i canali WideIPTV
 WIDE_MAP = {
-    "sport24": "SkySport24IT"
+    "sport24-2": "SkySport24IT"
 }
 
 HEADERS_TVNOW = {
