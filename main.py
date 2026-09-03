@@ -6,7 +6,9 @@ app = Flask(__name__)
 # Mappatura dei nomi personalizzati agli ID reali del sito (facoltativo ma comodo)
 CHANNEL_MAP = {
     "sportuno": "461",
-    "sportcalcio": "870"
+    "sportcalcio": "870",
+    "sportf1": "577",
+    "sportmoto": "575"
 }
 
 HEADERS = {
