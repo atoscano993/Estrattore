@@ -4,7 +4,6 @@ from flask import Flask, redirect
 
 app = Flask(__name__)
 
-# URL della pagina sorgente
 PAGE_URL = "https://htsport.org/sportunohd.htm"
 
 HEADERS = {
@@ -15,20 +14,31 @@ HEADERS = {
 @app.route('/sportuno.m3u8')
 def get_stream():
     try:
-        # 1. Scarica la pagina web
-        response = requests.get(PAGE_URL, headers=HEADERS, timeout=10)
-        html = response.text
+        # 1. Scarica la pagina principale
+        session = requests.Session()
+        res = session.get(PAGE_URL, headers=HEADERS, timeout=10)
         
-        # 2. Cerca il link .m3u8 usando un'espressione regolare nel codice sorgente
-        match = re.search(r'(https?://[^\s\'"]+\.m3u8[^\s\'"]*)', html)
+        # 2. Cerca se c'è un iframe nella pagina
+        iframe_match = re.search(r'iframe[^\">]+src=["\']([^"\']+)["\']', res.text, re.IGNORECASE)
         
-        if match:
-            m3u8_url = match.group(1)
-            # Reindirizza il lettore IPTV direttamente al link video trovato
-            return redirect(m3u8_url, code=302)
+        target_html = res.text
+        if iframe_match:
+            iframe_url = iframe_match.group(1)
+            if not iframe_url.startswith("http"):
+                iframe_url = "https://htsport.org/" + iframe_url.lstrip('/')
+            # Scarica il contenuto dell'iframe
+            res_iframe = session.get(iframe_url, headers=HEADERS, timeout=10)
+            target_html = res_iframe.text
+
+        # 3. Cerca il link .m3u8 nel codice ottenuto
+        m3u8_match = re.search(r'(https?://[^\s\'"]+\.m3u8[^\s\'"]*)', target_html)
+        
+        if m3u8_match:
+            final_url = m3u8_match.group(1)
+            return redirect(final_url, code=302)
         else:
-            return "Link m3u8 non trovato nella pagina", 404
-            
+            return "Impossibile trovare il link m3u8 nella pagina o nell'iframe.", 404
+
     except Exception as e:
         return f"Errore durante l'estrazione: {str(e)}", 500
 
