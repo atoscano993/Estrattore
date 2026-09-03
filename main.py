@@ -9,7 +9,9 @@ TVNOW_MAP = {
     "sportuno": "461",
     "sportcalcio": "870",
     "sportf1": "577",
-    "sportmoto": "575"
+    "sportmoto": "575",
+    "sportmax": "460",
+    "sporttennis": "576
 }
 
 # Mappatura per i canali WideIPTV (aggiungiamo qui Sky Sport 24)
