@@ -1,6 +1,5 @@
 import re
 import os
-import base64
 import requests
 from flask import Flask, redirect
 
@@ -35,43 +34,42 @@ HEADERS_HTSPORT = {
 def home():
     return "Estrattore attivo", 200
 
-# --- 1. ROTTA PRINCIPALE VELOCE (TVNOW Diretta) ---
+# ==========================================
+# 1. ROTTE TVNOW (DIRETTE E VELOCI)
+# ==========================================
 @app.route('/<channel_name>.m3u8')
 def get_stream(channel_name):
     name_clean = channel_name.lower()
     
     if name_clean in TVNOW_MAP or name_clean.isdigit():
         stream_id = TVNOW_MAP.get(name_clean, channel_name)
-        try:
-            api_url = f"https://chat.cfbu247.sbs/api/resolve-dlstream/{stream_id}"
-            response = requests.get(api_url, headers=HEADERS_TVNOW, timeout=10)
-            
-            if response.status_code == 200:
-                data = response.json()
-                stream_url = data.get("m3u8") or data.get("proxyPlaylistUrl")
-                if stream_url:
-                    return redirect(stream_url, code=302)
-        except Exception as e:
-            print(f"Errore TVNOW: {e}")
+        return resolve_tvnow_stream(stream_id)
 
-    return f"Flusso TVNow per il canale '{channel_name}' non disponibile", 404
+    return f"Canale TVNow '{channel_name}' non valido", 404
 
-# --- 2. ROTTA DIRETTA PER ID TVNOW ---
 @app.route('/tvnow/<channel_id>.m3u8')
 def get_tvnow_by_id(channel_id):
+    return resolve_tvnow_stream(channel_id)
+
+def resolve_tvnow_stream(stream_id):
+    """Funzione helper dedicata per risolvere gli ID TVNow"""
     try:
-        api_url = f"https://chat.cfbu247.sbs/api/resolve-dlstream/{channel_id}"
+        api_url = f"https://chat.cfbu247.sbs/api/resolve-dlstream/{stream_id}"
         response = requests.get(api_url, headers=HEADERS_TVNOW, timeout=10)
+        
         if response.status_code == 200:
             data = response.json()
             stream_url = data.get("m3u8") or data.get("proxyPlaylistUrl")
             if stream_url:
                 return redirect(stream_url, code=302)
-        return "Canale TVNOW non trovato", 404
+                
+        return f"Flusso TVNow (ID: {stream_id}) non disponibile", 404
     except Exception as e:
-        return f"Errore server: {e}", 500
+        return f"Errore server TVNow: {e}", 500
 
-# --- 3. ROTTA DINAMICA HTSPORT (CON DECODER BASE64 + HEX) ---
+# ==========================================
+# 2. ROTTA HTSPORT (SOLO SORGENTI NATIVE)
+# ==========================================
 @app.route('/htsport/<page_name>.m3u8')
 def get_htsport_dynamic(page_name):
     try:
@@ -83,23 +81,11 @@ def get_htsport_dynamic(page_name):
         
         page_resp = session.get(target_url, timeout=10)
         if page_resp.status_code != 200:
-            return f"Pagina {target_url} non trovata (HTTP {page_resp.status_code})", 404
+            return f"Pagina {target_url} non trovata", 404
             
         html = page_resp.text
 
-        # A. Cerca ID TVNow
-        match_tvnow = re.search(r'(?:resolve-dlstream/|id=)(\d+)', html)
-        if match_tvnow:
-            stream_id = match_tvnow.group(1)
-            api_url = f"https://chat.cfbu247.sbs/api/resolve-dlstream/{stream_id}"
-            resp = session.get(api_url, headers=HEADERS_TVNOW, timeout=10)
-            if resp.status_code == 200:
-                data = resp.json()
-                stream_url = data.get("m3u8") or data.get("proxyPlaylistUrl")
-                if stream_url:
-                    return redirect(stream_url, code=302)
-
-        # B. Cerca IFRAME e link sorgente
+        # Cerca eventuali iframe sorgente nella pagina
         iframes = re.findall(r'<iframe[^>]+src=["\']([^"\']+)["\']', html, re.IGNORECASE)
         if not iframes:
             iframes = re.findall(r'(?:src|href)=["\']([^"\']*(?:embed|player|frame|live)[^"\']*)["\']', html, re.IGNORECASE)
@@ -120,51 +106,18 @@ def get_htsport_dynamic(page_name):
                 if sub_resp.status_code == 200:
                     sub_text = sub_resp.text
                     
-                    # 1. m3u8 in chiaro
+                    # Estrazione m3u8 in chiaro se presente
                     match_m3u8 = re.search(r'["\'](https?://[^"\']+\.m3u8[^"\']*)["\']', sub_text)
                     if match_m3u8:
                         return redirect(match_m3u8.group(1).replace(r'\/', '/'), code=302)
 
-                    # 2. Decodifica Hex (Clappr)
-                    hex_matches = re.findall(r'["\']([0-9a-fA-F]{30,})["\']', sub_text)
-                    for hex_str in hex_matches:
-                        try:
-                            decoded = bytes.fromhex(hex_str).decode('utf-8', errors='ignore')
-                            match_dec = re.search(r'(https?://[^\s"\']+\.m3u8[^\s"\']*)', decoded)
-                            if match_dec:
-                                return redirect(match_dec.group(1).replace(r'\/', '/'), code=302)
-                        except Exception:
-                            continue
-
-                    # 3. Decodifica Base64 (EpiEmbeds / Live7)
-                    b64_matches = re.findall(r'["\']([a-zA-Z0-9+/=]{40,})["\']', sub_text)
-                    for b64_str in b64_matches:
-                        try:
-                            decoded = base64.b64decode(b64_str).decode('utf-8', errors='ignore')
-                            match_b64 = re.search(r'(https?://[^\s"\']+\.m3u8[^\s"\']*)', decoded)
-                            if match_b64:
-                                return redirect(match_b64.group(1).replace(r'\/', '/'), code=302)
-                        except Exception:
-                            continue
-
-                    # 4. ID TVNow nidificato
-                    match_sub_tvnow = re.search(r'(?:resolve-dlstream/|id=)(\d+)', sub_text)
-                    if match_sub_tvnow:
-                        stream_id = match_sub_tvnow.group(1)
-                        api_url = f"https://chat.cfbu247.sbs/api/resolve-dlstream/{stream_id}"
-                        resp = session.get(api_url, headers=HEADERS_TVNOW, timeout=10)
-                        if resp.status_code == 200:
-                            data = resp.json()
-                            stream_url = data.get("m3u8") or data.get("proxyPlaylistUrl")
-                            if stream_url:
-                                return redirect(stream_url, code=302)
             except Exception:
                 continue
 
-        return "Nessun flusso m3u8 estratto dalla pagina HTSport", 404
+        return "Nessun flusso m3u8 nativo estratto da HTSport", 404
 
     except Exception as e:
-        return f"Errore Dynamic HTSport: {e}", 500
+        return f"Errore HTSport: {e}", 500
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 8080))
