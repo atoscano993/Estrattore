@@ -73,7 +73,7 @@ def get_tvnow_by_id(channel_id):
 def get_htsport_dynamic(page_name):
     try:
         target_url = f"https://htsport.org/{page_name}.htm"
-        page_resp = requests.get(target_url, headers=HEADERS_HTSPORT, timeout=7)
+        page_resp = requests.get(target_url, headers=HEADERS_HTSPORT, timeout=10)
         
         if page_resp.status_code != 200:
             return f"Pagina {target_url} non trovata (HTTP {page_resp.status_code})", 404
@@ -85,7 +85,7 @@ def get_htsport_dynamic(page_name):
         if match_tvnow:
             stream_id = match_tvnow.group(1)
             api_url = f"https://chat.cfbu247.sbs/api/resolve-dlstream/{stream_id}"
-            resp = requests.get(api_url, headers=HEADERS_TVNOW, timeout=5)
+            resp = requests.get(api_url, headers=HEADERS_TVNOW, timeout=10)
             if resp.status_code == 200:
                 data = resp.json()
                 stream_url = data.get("m3u8") or data.get("proxyPlaylistUrl")
@@ -96,7 +96,7 @@ def get_htsport_dynamic(page_name):
         match_wide = re.search(r'src=["\'](https?://wideiptv\.top/player/[^"\']+)["\']', html)
         if match_wide:
             player_url = match_wide.group(1)
-            player_resp = requests.get(player_url, headers=HEADERS_HTSPORT, timeout=7)
+            player_resp = requests.get(player_url, headers=HEADERS_HTSPORT, timeout=10)
             if player_resp.status_code == 200:
                 match_stream = re.search(r'streamUrl:\s*["\']([^"\']+)["\']', player_resp.text)
                 if match_stream:
@@ -110,13 +110,13 @@ def get_htsport_dynamic(page_name):
             if not sub_url.startswith("http"):
                 sub_url = f"https://htsport.org/{sub_url.lstrip('/')}"
             
-            sub_resp = requests.get(sub_url, headers=HEADERS_HTSPORT, timeout=7)
+            sub_resp = requests.get(sub_url, headers=HEADERS_HTSPORT, timeout=10)
             if sub_resp.status_code == 200:
                 match_sub_tvnow = re.search(r'resolve-dlstream/(\d+)', sub_resp.text)
                 if match_sub_tvnow:
                     stream_id = match_sub_tvnow.group(1)
                     api_url = f"https://chat.cfbu247.sbs/api/resolve-dlstream/{stream_id}"
-                    resp = requests.get(api_url, headers=HEADERS_TVNOW, timeout=5)
+                    resp = requests.get(api_url, headers=HEADERS_TVNOW, timeout=10)
                     if resp.status_code == 200:
                         data = resp.json()
                         stream_url = data.get("m3u8") or data.get("proxyPlaylistUrl")
@@ -129,16 +129,16 @@ def get_htsport_dynamic(page_name):
         return f"Errore Dynamic: {e}", 500
 
 
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=8080)
-
-# --- ROTTA DI DEBUG TEMPORANEA ---
+# --- 4. ROTTA DI DEBUG TEMPORANEA ---
 @app.route('/debug/<page_name>')
 def debug_page(page_name):
     try:
         url = f"https://htsport.org/{page_name}.htm"
-        resp = requests.get(url, headers=HEADERS_HTSPORT, timeout=7)
-        # Pulisce l'HTML per mostrare solo i tag iframe e script utili
-        return f"<h3>Status: {resp.status_code}</h3><textarea style='width:100%;height:500px;'>{resp.text}</textarea>"
+        resp = requests.get(url, headers=HEADERS_HTSPORT, timeout=10)
+        return f"<h3>Status Code: {resp.status_code}</h3><textarea style='width:100%;height:500px;'>{resp.text}</textarea>"
     except Exception as e:
         return f"Errore: {e}"
+
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=8080)
