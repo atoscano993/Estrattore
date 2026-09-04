@@ -45,7 +45,7 @@ def get_twnow247_dynamic(page_name):
         session.headers.update(HEADERS_BASE)
         session.headers.update({"Referer": "https://twnow247.com/"})
         
-        target_url = f"https://twnow247.com/{clean_name}.php"
+        target_url = f"https://twnow247.top/{clean_name}.php"
         resp = session.get(target_url, timeout=10)
         
         if resp.status_code == 200:
