@@ -1,5 +1,6 @@
 import re
 import os
+import base64
 import requests
 from flask import Flask, redirect
 
@@ -70,7 +71,7 @@ def get_tvnow_by_id(channel_id):
     except Exception as e:
         return f"Errore server: {e}", 500
 
-# --- 3. ROTTA DINAMICA HTSPORT (CON DECODER PER DAZN1HD) ---
+# --- 3. ROTTA DINAMICA HTSPORT (CON DECODER BASE64 + HEX) ---
 @app.route('/htsport/<page_name>.m3u8')
 def get_htsport_dynamic(page_name):
     try:
@@ -86,7 +87,7 @@ def get_htsport_dynamic(page_name):
             
         html = page_resp.text
 
-        # Cerca ID TVNow
+        # A. Cerca ID TVNow
         match_tvnow = re.search(r'(?:resolve-dlstream/|id=)(\d+)', html)
         if match_tvnow:
             stream_id = match_tvnow.group(1)
@@ -98,7 +99,7 @@ def get_htsport_dynamic(page_name):
                 if stream_url:
                     return redirect(stream_url, code=302)
 
-        # Cerca IFRAME
+        # B. Cerca IFRAME e link sorgente
         iframes = re.findall(r'<iframe[^>]+src=["\']([^"\']+)["\']', html, re.IGNORECASE)
         if not iframes:
             iframes = re.findall(r'(?:src|href)=["\']([^"\']*(?:embed|player|frame|live)[^"\']*)["\']', html, re.IGNORECASE)
@@ -124,18 +125,29 @@ def get_htsport_dynamic(page_name):
                     if match_m3u8:
                         return redirect(match_m3u8.group(1).replace(r'\/', '/'), code=302)
 
-                    # 2. Decodifica Hex per Clappr (Dazn1HD)
+                    # 2. Decodifica Hex (Clappr)
                     hex_matches = re.findall(r'["\']([0-9a-fA-F]{30,})["\']', sub_text)
                     for hex_str in hex_matches:
                         try:
                             decoded = bytes.fromhex(hex_str).decode('utf-8', errors='ignore')
-                            match_dec_m3u8 = re.search(r'(https?://[^\s"\']+\.m3u8[^\s"\']*)', decoded)
-                            if match_dec_m3u8:
-                                return redirect(match_dec_m3u8.group(1).replace(r'\/', '/'), code=302)
+                            match_dec = re.search(r'(https?://[^\s"\']+\.m3u8[^\s"\']*)', decoded)
+                            if match_dec:
+                                return redirect(match_dec.group(1).replace(r'\/', '/'), code=302)
                         except Exception:
                             continue
 
-                    # 3. ID TVNow nidificato
+                    # 3. Decodifica Base64 (EpiEmbeds / Live7)
+                    b64_matches = re.findall(r'["\']([a-zA-Z0-9+/=]{40,})["\']', sub_text)
+                    for b64_str in b64_matches:
+                        try:
+                            decoded = base64.b64decode(b64_str).decode('utf-8', errors='ignore')
+                            match_b64 = re.search(r'(https?://[^\s"\']+\.m3u8[^\s"\']*)', decoded)
+                            if match_b64:
+                                return redirect(match_b64.group(1).replace(r'\/', '/'), code=302)
+                        except Exception:
+                            continue
+
+                    # 4. ID TVNow nidificato
                     match_sub_tvnow = re.search(r'(?:resolve-dlstream/|id=)(\d+)', sub_text)
                     if match_sub_tvnow:
                         stream_id = match_sub_tvnow.group(1)
