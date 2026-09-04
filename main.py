@@ -131,3 +131,14 @@ def get_htsport_dynamic(page_name):
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=8080)
+
+# --- ROTTA DI DEBUG TEMPORANEA ---
+@app.route('/debug/<page_name>')
+def debug_page(page_name):
+    try:
+        url = f"https://htsport.org/{page_name}.htm"
+        resp = requests.get(url, headers=HEADERS_HTSPORT, timeout=7)
+        # Mostra il codice HTML che il server riesce effettivamente a scaricare
+        return f"<h3>Status Code: {resp.status_code}</h3><pre>{resp.text[:3000]}</pre>"
+    except Exception as e:
+        return f"Errore: {e}"
