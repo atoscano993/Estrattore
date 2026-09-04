@@ -16,35 +16,47 @@ def get_htsport_dynamic(page_name):
         session = requests.Session()
         session.headers.update(HEADERS_BASE)
         
-        # 1. Carica la pagina di HTSport (es. dazn1hd.htm)
+        # 1. Pagina Principale HTSport
         target_url = f"https://htsport.org/{page_name}.htm"
         resp = session.get(target_url, timeout=10)
         if resp.status_code != 200:
             return f"Pagina {target_url} non trovata", 404
 
-        # 2. Trova il link dell'iframe (es. epiembeds o altri)
+        # 2. Estrazione Iframe
         match_iframe = re.search(r'<iframe[^>]+src=["\']([^"\']+)["\']', resp.text, re.IGNORECASE)
         if not match_iframe:
-            return "Iframe del player non trovato nella pagina", 404
+            return "Iframe del player non trovato", 404
 
         iframe_url = match_iframe.group(1)
         if iframe_url.startswith("//"):
             iframe_url = f"https:{iframe_url}"
 
-        # 3. Aggiorna il Referer e naviga dentro l'iframe
+        # 3. Richiesta al Player Embed
         session.headers.update({"Referer": target_url})
         iframe_resp = session.get(iframe_url, timeout=10)
         
         if iframe_resp.status_code == 200:
-            # 4. Estrae qualsiasi URL .m3u8 presente nel codice HTML/JS dell'iframe
-            # Cattura domini dinamici tipo hdesx.cdx-*.website/...
-            match_m3u8 = re.search(r'["\'](https?://[^"\']+\.m3u8[^"\']*)["\']', iframe_resp.text)
+            content = iframe_resp.text
             
+            # Pattern A: Link diretto .m3u8
+            match_m3u8 = re.search(r'["\'](https?://[^"\']+\.m3u8[^"\']*)["\']', content)
             if match_m3u8:
-                stream_url = match_m3u8.group(1).replace(r'\/', '/')
+                return redirect(match_m3u8.group(1).replace(r'\/', '/'), code=302)
+
+            # Pattern B: Estrazione URL dal dominio dello Stream Host (cdx-*.website)
+            match_cdx = re.search(r'["\'](https?://[^"\']*cdx-[^"\']+\.m3u8[^"\']*)["\']', content)
+            if match_cdx:
+                return redirect(match_cdx.group(1).replace(r'\/', '/'), code=302)
+
+            # Pattern C: Configurazione JS (file: "...", source: "...")
+            match_js_source = re.search(r'(?:file|source|src)\s*:\s*["\']([^"\']+\.m3u8[^"\']*)["\']', content)
+            if match_js_source:
+                stream_url = match_js_source.group(1).replace(r'\/', '/')
+                if not stream_url.startswith("http"):
+                    stream_url = f"https:{stream_url}" if stream_url.startswith("//") else stream_url
                 return redirect(stream_url, code=302)
 
-        return "Impossibile estrarre il flusso .m3u8 dinamico dal player", 404
+        return "Impossibile estrarre il flusso dal player JS", 404
 
     except Exception as e:
         return f"Errore server: {e}", 500
