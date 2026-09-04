@@ -138,7 +138,7 @@ def debug_page(page_name):
     try:
         url = f"https://htsport.org/{page_name}.htm"
         resp = requests.get(url, headers=HEADERS_HTSPORT, timeout=7)
-        # Mostra il codice HTML che il server riesce effettivamente a scaricare
-        return f"<h3>Status Code: {resp.status_code}</h3><pre>{resp.text[:3000]}</pre>"
+        # Pulisce l'HTML per mostrare solo i tag iframe e script utili
+        return f"<h3>Status: {resp.status_code}</h3><textarea style='width:100%;height:500px;'>{resp.text}</textarea>"
     except Exception as e:
         return f"Errore: {e}"
