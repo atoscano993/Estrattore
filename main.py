@@ -1,4 +1,5 @@
 import re
+import os
 import requests
 from flask import Flask, redirect
 
@@ -29,6 +30,9 @@ HEADERS_HTSPORT = {
     "Origin": "https://htsport.org"
 }
 
+@app.route('/')
+def home():
+    return "Estrattore attivo", 200
 
 # --- 1. ROTTA PRINCIPALE VELOCE (TVNOW Diretta) ---
 @app.route('/<channel_name>.m3u8')
@@ -51,7 +55,6 @@ def get_stream(channel_name):
 
     return f"Flusso TVNow per il canale '{channel_name}' non disponibile", 404
 
-
 # --- 2. ROTTA DIRETTA PER ID TVNOW ---
 @app.route('/tvnow/<channel_id>.m3u8')
 def get_tvnow_by_id(channel_id):
@@ -67,8 +70,7 @@ def get_tvnow_by_id(channel_id):
     except Exception as e:
         return f"Errore server: {e}", 500
 
-
-# --- 3. ROTTA DINAMICA HTSPORT (PARSER CON DECODER INTEGRATO) ---
+# --- 3. ROTTA DINAMICA HTSPORT (CON DECODER PER DAZN1HD) ---
 @app.route('/htsport/<page_name>.m3u8')
 def get_htsport_dynamic(page_name):
     try:
@@ -84,7 +86,7 @@ def get_htsport_dynamic(page_name):
             
         html = page_resp.text
 
-        # A. Cerca API diretta CFBU / TVNow
+        # Cerca ID TVNow
         match_tvnow = re.search(r'(?:resolve-dlstream/|id=)(\d+)', html)
         if match_tvnow:
             stream_id = match_tvnow.group(1)
@@ -96,10 +98,8 @@ def get_htsport_dynamic(page_name):
                 if stream_url:
                     return redirect(stream_url, code=302)
 
-        # B. Estrazione di tutti gli IFRAME / EMBED
+        # Cerca IFRAME
         iframes = re.findall(r'<iframe[^>]+src=["\']([^"\']+)["\']', html, re.IGNORECASE)
-        
-        # Se non trova iframe, cerca link generici di player
         if not iframes:
             iframes = re.findall(r'(?:src|href)=["\']([^"\']*(?:embed|player|frame|live)[^"\']*)["\']', html, re.IGNORECASE)
 
@@ -119,12 +119,12 @@ def get_htsport_dynamic(page_name):
                 if sub_resp.status_code == 200:
                     sub_text = sub_resp.text
                     
-                    # 1. Cerca link m3u8 in chiaro
+                    # 1. m3u8 in chiaro
                     match_m3u8 = re.search(r'["\'](https?://[^"\']+\.m3u8[^"\']*)["\']', sub_text)
                     if match_m3u8:
                         return redirect(match_m3u8.group(1).replace(r'\/', '/'), code=302)
 
-                    # 2. Decodifica variabili Clappr / EpiEmbeds (sorgenti in Hex o Base64)
+                    # 2. Decodifica Hex per Clappr (Dazn1HD)
                     hex_matches = re.findall(r'["\']([0-9a-fA-F]{30,})["\']', sub_text)
                     for hex_str in hex_matches:
                         try:
@@ -135,7 +135,7 @@ def get_htsport_dynamic(page_name):
                         except Exception:
                             continue
 
-                    # 3. Cerca ID TVNow nidificati nell'iframe
+                    # 3. ID TVNow nidificato
                     match_sub_tvnow = re.search(r'(?:resolve-dlstream/|id=)(\d+)', sub_text)
                     if match_sub_tvnow:
                         stream_id = match_sub_tvnow.group(1)
@@ -153,3 +153,7 @@ def get_htsport_dynamic(page_name):
 
     except Exception as e:
         return f"Errore Dynamic HTSport: {e}", 500
+
+if __name__ == '__main__':
+    port = int(os.environ.get('PORT', 8080))
+    app.run(host='0.0.0.0', port=port)
