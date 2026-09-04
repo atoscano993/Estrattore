@@ -68,7 +68,7 @@ def get_tvnow_by_id(channel_id):
         return f"Errore server: {e}", 500
 
 
-# --- 3. ROTTA DINAMICA HTSPORT UNIVERSALE ---
+# --- 3. ROTTA DINAMICA HTSPORT (PARSER MULTI-PLAYER UNIFICATO) ---
 @app.route('/htsport/<page_name>.m3u8')
 def get_htsport_dynamic(page_name):
     try:
@@ -80,7 +80,22 @@ def get_htsport_dynamic(page_name):
             
         html = page_resp.text
 
-        # 1. Ricerca diretta ID TVNow
+        # 1. CASO EPIEMBEDS (Quello trovato nella tua pagina!)
+        match_epiembeds = re.search(r'src=["\'](https?://[^"\']*epiembeds\.[^"\']+)["\']', html, re.IGNORECASE)
+        if match_epiembeds:
+            embed_url = match_epiembeds.group(1)
+            embed_headers = HEADERS_HTSPORT.copy()
+            embed_headers["Referer"] = target_url
+            
+            embed_resp = requests.get(embed_url, headers=embed_headers, timeout=10)
+            if embed_resp.status_code == 200:
+                # Estrae il file m3u8 dal JS di EpiEmbeds
+                match_m3u8 = re.search(r'["\'](https?://[^"\']+\.m3u8[^"\']*)["\']', embed_resp.text)
+                if match_m3u8:
+                    stream_url = match_m3u8.group(1).replace(r'\/', '/')
+                    return redirect(stream_url, code=302)
+
+        # 2. CASO TVNOW / CFBU
         match_tvnow = re.search(r'(?:resolve-dlstream/|id=)(\d+)', html)
         if match_tvnow:
             stream_id = match_tvnow.group(1)
@@ -92,7 +107,7 @@ def get_htsport_dynamic(page_name):
                 if stream_url:
                     return redirect(stream_url, code=302)
 
-        # 2. Ricerca player WideIPTV
+        # 3. CASO WIDEIPTV
         match_wide = re.search(r'src=["\'](https?://wideiptv\.top/player/[^"\']+)["\']', html)
         if match_wide:
             player_url = match_wide.group(1)
@@ -103,7 +118,7 @@ def get_htsport_dynamic(page_name):
                     stream_url = match_stream.group(1).replace(r'\/', '/')
                     return redirect(stream_url, code=302)
 
-        # 3. Scansione Universale di TUTTI gli iframe trovati nella pagina
+        # 4. SCANSIONE GENERICA DI TUTTI GLI IFRAME
         iframes = re.findall(r'<iframe[^>]+src=["\']([^"\']+)["\']', html, re.IGNORECASE)
         for iframe_src in iframes:
             if iframe_src.startswith("//"):
@@ -114,9 +129,17 @@ def get_htsport_dynamic(page_name):
                 sub_url = iframe_src
 
             try:
-                sub_resp = requests.get(sub_url, headers=HEADERS_HTSPORT, timeout=6)
+                sub_headers = HEADERS_HTSPORT.copy()
+                sub_headers["Referer"] = target_url
+                sub_resp = requests.get(sub_url, headers=sub_headers, timeout=6)
+                
                 if sub_resp.status_code == 200:
-                    # Cerca ID TVNow nell'iframe di secondo livello
+                    # Cerca link m3u8 generici
+                    match_m3u8 = re.search(r'["\'](https?://[^"\']+\.m3u8[^"\']*)["\']', sub_resp.text)
+                    if match_m3u8:
+                        return redirect(match_m3u8.group(1).replace(r'\/', '/'), code=302)
+                        
+                    # Cerca ID TVNow
                     match_sub_tvnow = re.search(r'(?:resolve-dlstream/|id=)(\d+)', sub_resp.text)
                     if match_sub_tvnow:
                         stream_id = match_sub_tvnow.group(1)
@@ -127,11 +150,6 @@ def get_htsport_dynamic(page_name):
                             stream_url = data.get("m3u8") or data.get("proxyPlaylistUrl")
                             if stream_url:
                                 return redirect(stream_url, code=302)
-
-                    # Cerca direttamente un URL m3u8 nell'iframe
-                    match_m3u8 = re.search(r'["\'](https?://[^"\']+\.m3u8[^"\']*)["\']', sub_resp.text)
-                    if match_m3u8:
-                        return redirect(match_m3u8.group(1).replace(r'\/', '/'), code=302)
             except Exception:
                 continue
 
