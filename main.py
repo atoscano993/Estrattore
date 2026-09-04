@@ -68,7 +68,7 @@ def get_tvnow_by_id(channel_id):
         return f"Errore server: {e}", 500
 
 
-# --- 3. ROTTA DINAMICA HTSPORT (UNIVERSALE PER TVNOW & WIDEIPTV) ---
+# --- 3. ROTTA DINAMICA HTSPORT UNIVERSALE ---
 @app.route('/htsport/<page_name>.m3u8')
 def get_htsport_dynamic(page_name):
     try:
@@ -80,7 +80,7 @@ def get_htsport_dynamic(page_name):
             
         html = page_resp.text
 
-        # 1. CASO A: Il player è TVNow/CFBU
+        # 1. Ricerca diretta ID TVNow
         match_tvnow = re.search(r'(?:resolve-dlstream/|id=)(\d+)', html)
         if match_tvnow:
             stream_id = match_tvnow.group(1)
@@ -92,7 +92,7 @@ def get_htsport_dynamic(page_name):
                 if stream_url:
                     return redirect(stream_url, code=302)
 
-        # 2. CASO B: Il player è WideIPTV
+        # 2. Ricerca player WideIPTV
         match_wide = re.search(r'src=["\'](https?://wideiptv\.top/player/[^"\']+)["\']', html)
         if match_wide:
             player_url = match_wide.group(1)
@@ -103,41 +103,42 @@ def get_htsport_dynamic(page_name):
                     stream_url = match_stream.group(1).replace(r'\/', '/')
                     return redirect(stream_url, code=302)
 
-        # 3. CASO C: Iframe generico
-        iframe_src = re.search(r'<iframe[^>]+src=["\']([^"\']+)["\']', html, re.IGNORECASE)
-        if iframe_src:
-            sub_url = iframe_src.group(1)
-            if not sub_url.startswith("http"):
-                sub_url = f"https://htsport.org/{sub_url.lstrip('/')}"
-            
-            sub_resp = requests.get(sub_url, headers=HEADERS_HTSPORT, timeout=10)
-            if sub_resp.status_code == 200:
-                match_sub_tvnow = re.search(r'resolve-dlstream/(\d+)', sub_resp.text)
-                if match_sub_tvnow:
-                    stream_id = match_sub_tvnow.group(1)
-                    api_url = f"https://chat.cfbu247.sbs/api/resolve-dlstream/{stream_id}"
-                    resp = requests.get(api_url, headers=HEADERS_TVNOW, timeout=10)
-                    if resp.status_code == 200:
-                        data = resp.json()
-                        stream_url = data.get("m3u8") or data.get("proxyPlaylistUrl")
-                        if stream_url:
-                            return redirect(stream_url, code=302)
+        # 3. Scansione Universale di TUTTI gli iframe trovati nella pagina
+        iframes = re.findall(r'<iframe[^>]+src=["\']([^"\']+)["\']', html, re.IGNORECASE)
+        for iframe_src in iframes:
+            if iframe_src.startswith("//"):
+                sub_url = f"https:{iframe_src}"
+            elif not iframe_src.startswith("http"):
+                sub_url = f"https://htsport.org/{iframe_src.lstrip('/')}"
+            else:
+                sub_url = iframe_src
+
+            try:
+                sub_resp = requests.get(sub_url, headers=HEADERS_HTSPORT, timeout=6)
+                if sub_resp.status_code == 200:
+                    # Cerca ID TVNow nell'iframe di secondo livello
+                    match_sub_tvnow = re.search(r'(?:resolve-dlstream/|id=)(\d+)', sub_resp.text)
+                    if match_sub_tvnow:
+                        stream_id = match_sub_tvnow.group(1)
+                        api_url = f"https://chat.cfbu247.sbs/api/resolve-dlstream/{stream_id}"
+                        resp = requests.get(api_url, headers=HEADERS_TVNOW, timeout=10)
+                        if resp.status_code == 200:
+                            data = resp.json()
+                            stream_url = data.get("m3u8") or data.get("proxyPlaylistUrl")
+                            if stream_url:
+                                return redirect(stream_url, code=302)
+
+                    # Cerca direttamente un URL m3u8 nell'iframe
+                    match_m3u8 = re.search(r'["\'](https?://[^"\']+\.m3u8[^"\']*)["\']', sub_resp.text)
+                    if match_m3u8:
+                        return redirect(match_m3u8.group(1).replace(r'\/', '/'), code=302)
+            except Exception:
+                continue
 
         return "Nessun player compatibile estratto dalla pagina HTSport", 404
 
     except Exception as e:
         return f"Errore Dynamic: {e}", 500
-
-
-# --- 4. ROTTA DI DEBUG TEMPORANEA ---
-@app.route('/debug/<page_name>')
-def debug_page(page_name):
-    try:
-        url = f"https://htsport.org/{page_name}.htm"
-        resp = requests.get(url, headers=HEADERS_HTSPORT, timeout=10)
-        return f"<h3>Status Code: {resp.status_code}</h3><textarea style='width:100%;height:500px;'>{resp.text}</textarea>"
-    except Exception as e:
-        return f"Errore: {e}"
 
 
 if __name__ == '__main__':
