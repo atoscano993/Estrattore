@@ -68,7 +68,7 @@ def get_tvnow_by_id(channel_id):
         return f"Errore server: {e}", 500
 
 
-# --- 3. ROTTA DINAMICA HTSPORT (PARSER POTENZIATO) ---
+# --- 3. ROTTA DINAMICA HTSPORT (PARSER CON DECODER INTEGRATO) ---
 @app.route('/htsport/<page_name>.m3u8')
 def get_htsport_dynamic(page_name):
     try:
@@ -84,7 +84,7 @@ def get_htsport_dynamic(page_name):
             
         html = page_resp.text
 
-        # A. Cerca un'eventuale API diretta CFBU / TVNow
+        # A. Cerca API diretta CFBU / TVNow
         match_tvnow = re.search(r'(?:resolve-dlstream/|id=)(\d+)', html)
         if match_tvnow:
             stream_id = match_tvnow.group(1)
@@ -96,42 +96,46 @@ def get_htsport_dynamic(page_name):
                 if stream_url:
                     return redirect(stream_url, code=302)
 
-        # B. Estrazione generica di tutti gli iframe e script nell'ordine
-        links_to_check = re.findall(r'(?:src|href)=["\']([^"\']+)["\']', html, re.IGNORECASE)
+        # B. Estrazione di tutti gli IFRAME / EMBED
+        iframes = re.findall(r'<iframe[^>]+src=["\']([^"\']+)["\']', html, re.IGNORECASE)
         
-        for src in links_to_check:
-            if not any(k in src.lower() for k in ['embed', 'player', 'frame', 'live', 'stream', 'htsport']):
-                continue
-                
-            if src.startswith("//"):
-                sub_url = f"https:{src}"
-            elif not src.startswith("http"):
-                sub_url = f"https://htsport.org/{src.lstrip('/')}"
+        # Se non trova iframe, cerca link generici di player
+        if not iframes:
+            iframes = re.findall(r'(?:src|href)=["\']([^"\']*(?:embed|player|frame|live)[^"\']*)["\']', html, re.IGNORECASE)
+
+        for iframe_src in iframes:
+            if iframe_src.startswith("//"):
+                sub_url = f"https:{iframe_src}"
+            elif not iframe_src.startswith("http"):
+                sub_url = f"https://htsport.org/{iframe_src.lstrip('/')}"
             else:
-                sub_url = src
+                sub_url = iframe_src
 
             try:
-                # Aggiorna il Referer per emulare la navigazione reale
                 sub_headers = HEADERS_HTSPORT.copy()
                 sub_headers["Referer"] = target_url
-                sub_resp = session.get(sub_url, headers=sub_headers, timeout=6)
+                sub_resp = session.get(sub_url, headers=sub_headers, timeout=8)
                 
                 if sub_resp.status_code == 200:
                     sub_text = sub_resp.text
                     
-                    # 1. Cerca link m3u8 espliciti nel contenuto dell'iframe
+                    # 1. Cerca link m3u8 in chiaro
                     match_m3u8 = re.search(r'["\'](https?://[^"\']+\.m3u8[^"\']*)["\']', sub_text)
                     if match_m3u8:
-                        stream_url = match_m3u8.group(1).replace(r'\/', '/')
-                        return redirect(stream_url, code=302)
+                        return redirect(match_m3u8.group(1).replace(r'\/', '/'), code=302)
 
-                    # 2. Cerca parametri di configurazione file/streamUrl
-                    match_file = re.search(r'(?:file|streamUrl|source)\s*:\s*["\']([^"\']+\.m3u8[^"\']*)["\']', sub_text)
-                    if match_file:
-                        stream_url = match_file.group(1).replace(r'\/', '/')
-                        return redirect(stream_url, code=302)
-                        
-                    # 3. Cerca ID per risoluzione TVNow nell'iframe
+                    # 2. Decodifica variabili Clappr / EpiEmbeds (sorgenti in Hex o Base64)
+                    hex_matches = re.findall(r'["\']([0-9a-fA-F]{30,})["\']', sub_text)
+                    for hex_str in hex_matches:
+                        try:
+                            decoded = bytes.fromhex(hex_str).decode('utf-8', errors='ignore')
+                            match_dec_m3u8 = re.search(r'(https?://[^\s"\']+\.m3u8[^\s"\']*)', decoded)
+                            if match_dec_m3u8:
+                                return redirect(match_dec_m3u8.group(1).replace(r'\/', '/'), code=302)
+                        except Exception:
+                            continue
+
+                    # 3. Cerca ID TVNow nidificati nell'iframe
                     match_sub_tvnow = re.search(r'(?:resolve-dlstream/|id=)(\d+)', sub_text)
                     if match_sub_tvnow:
                         stream_id = match_sub_tvnow.group(1)
@@ -149,7 +153,3 @@ def get_htsport_dynamic(page_name):
 
     except Exception as e:
         return f"Errore Dynamic HTSport: {e}", 500
-
-
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=8080)
