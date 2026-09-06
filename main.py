@@ -1,123 +1,127 @@
-import re
 import os
 import requests
-from flask import Flask, redirect
+from flask import Flask, redirect, jsonify
 
 app = Flask(__name__)
 
-# --- MAPPA CANALI DIRETTI TVNOW ---
-TVNOW_MAP = {
-    "sport24": "869",
-    "sportuno": "461", 
-    "sportcalcio": "870", 
-    "sportf1": "577", 
-    "sportmoto": "575", 
-    "sportmax": "460", 
-    "sporttennis": "576",
-    "sportarena": "462",
-    "dazn1": "877"
-}
-
+# ==========================================
+# CONFIGURAZIONE HEADERS STANDARD
+# ==========================================
 HEADERS_TVNOW = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     "Referer": "https://tvnow247.top/",
     "Origin": "https://tvnow247.top"
 }
 
-HEADERS_HTSPORT = {
+HEADERS_DAMITV = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Referer": "https://htsport.org/",
-    "Origin": "https://htsport.org"
+    "Referer": "https://damitv.st/",
+    "Origin": "https://damitv.st"
 }
 
-@app.route('/')
-def home():
-    return "Estrattore attivo", 200
+# ==========================================
+# 1. CANALI AUTOMATICI (Mappatura ID)
+# TVNow usa le sole cifre, DamITV aggiunge "premium" al numero ID
+# ==========================================
+AUTOMATIC_CHANNELS = {
+    "sport24": {"tvnow_id": "869", "damitv_id": "premium869"},
+    "sportuno": {"tvnow_id": "461", "damitv_id": "premium461"},
+    "sportcalcio": {"tvnow_id": "870", "damitv_id": "premium870"},
+    "sportf1": {"tvnow_id": "577", "damitv_id": "premium577"},
+    "sportmoto": {"tvnow_id": "575", "damitv_id": "premium575"},
+    "sportmax": {"tvnow_id": "460", "damitv_id": "premium460"},
+    "sporttennis": {"tvnow_id": "576", "damitv_id": "premium576"},
+    "sportarena": {"tvnow_id": "462", "damitv_id": "premium462"},
+    "dazn1": {"tvnow_id": "877", "damitv_id": "premium877"}
+}
 
 # ==========================================
-# 1. ROTTE TVNOW (DIRETTE E VELOCI)
+# 2. CANALI MANUALI / HOT-SWAP
+# Incolla qui i link estrapolati a mano (HTSport, Forgemindly, ecc.)
 # ==========================================
-@app.route('/<channel_name>.m3u8')
-def get_stream(channel_name):
-    name_clean = channel_name.lower()
-    
-    if name_clean in TVNOW_MAP or name_clean.isdigit():
-        stream_id = TVNOW_MAP.get(name_clean, channel_name)
-        return resolve_tvnow_stream(stream_id)
+MANUAL_STREAMS = {
+    "htsport_1": "https://1w4o2c.7m12bgo8dx9z.net:8443/hls/wiyfbikc.m3u8?s=INSERISCI_TOKEN&e=INSERISCI_EXPIRES",
+    "forgemindly_1": "https://cdn7.zohanayaan.com:1686/hls/do47.m3u8?md5=INSERISCI_MD5&expires=INSERISCI_EXPIRES"
+}
 
-    return f"Canale TVNow '{channel_name}' non valido", 404
-
-@app.route('/tvnow/<channel_id>.m3u8')
-def get_tvnow_by_id(channel_id):
-    return resolve_tvnow_stream(channel_id)
-
+# ==========================================
+# FUNZIONI DI RESOLUTION
+# ==========================================
 def resolve_tvnow_stream(stream_id):
-    """Funzione helper dedicata per risolvere gli ID TVNow"""
+    """Risolve tramite API TVNow"""
     try:
         api_url = f"https://chat.cfbu247.sbs/api/resolve-dlstream/{stream_id}"
-        response = requests.get(api_url, headers=HEADERS_TVNOW, timeout=10)
-        
+        response = requests.get(api_url, headers=HEADERS_TVNOW, timeout=8)
         if response.status_code == 200:
             data = response.json()
             stream_url = data.get("m3u8") or data.get("proxyPlaylistUrl")
             if stream_url:
-                return redirect(stream_url, code=302)
-                
-        return f"Flusso TVNow (ID: {stream_id}) non disponibile", 404
+                return stream_url
     except Exception as e:
-        return f"Errore server TVNow: {e}", 500
+        print(f"[TVNOW ERROR] ID {stream_id}: {e}")
+    return None
 
-# ==========================================
-# 2. ROTTA HTSPORT (SOLO SORGENTI NATIVE)
-# ==========================================
-@app.route('/htsport/<page_name>.m3u8')
-def get_htsport_dynamic(page_name):
+def resolve_damitv_stream(damitv_id):
+    """Risolve/Verifica sorgente DamITV"""
     try:
-        clean_page = page_name.replace(".m3u8", "")
-        target_url = f"https://htsport.org/{clean_page}.htm"
-        
-        session = requests.Session()
-        session.headers.update(HEADERS_HTSPORT)
-        
-        page_resp = session.get(target_url, timeout=10)
-        if page_resp.status_code != 200:
-            return f"Pagina {target_url} non trovata", 404
-            
-        html = page_resp.text
-
-        # Cerca eventuali iframe sorgente nella pagina
-        iframes = re.findall(r'<iframe[^>]+src=["\']([^"\']+)["\']', html, re.IGNORECASE)
-        if not iframes:
-            iframes = re.findall(r'(?:src|href)=["\']([^"\']*(?:embed|player|frame|live)[^"\']*)["\']', html, re.IGNORECASE)
-
-        for iframe_src in iframes:
-            if iframe_src.startswith("//"):
-                sub_url = f"https:{iframe_src}"
-            elif not iframe_src.startswith("http"):
-                sub_url = f"https://htsport.org/{iframe_src.lstrip('/')}"
-            else:
-                sub_url = iframe_src
-
-            try:
-                sub_headers = HEADERS_HTSPORT.copy()
-                sub_headers["Referer"] = target_url
-                sub_resp = session.get(sub_url, headers=sub_headers, timeout=8)
-                
-                if sub_resp.status_code == 200:
-                    sub_text = sub_resp.text
-                    
-                    # Estrazione m3u8 in chiaro se presente
-                    match_m3u8 = re.search(r'["\'](https?://[^"\']+\.m3u8[^"\']*)["\']', sub_text)
-                    if match_m3u8:
-                        return redirect(match_m3u8.group(1).replace(r'\/', '/'), code=302)
-
-            except Exception:
-                continue
-
-        return "Nessun flusso m3u8 nativo estratto da HTSport", 404
-
+        url = f"https://messi.damitv.st/hls/{damitv_id}/index.m3u8"
+        response = requests.head(url, headers=HEADERS_DAMITV, timeout=4)
+        if response.status_code in [200, 302]:
+            return url
     except Exception as e:
-        return f"Errore HTSport: {e}", 500
+        print(f"[DAMITV ERROR] ID {damitv_id}: {e}")
+    return None
+
+# ==========================================
+# ROTTE FLASK
+# ==========================================
+@app.route('/')
+def home():
+    return "Estrattore attivo (TVNow + DamITV + Manual Streams)", 200
+
+# Endpoint unificato per il tuo file .m3u
+@app.route('/<channel_name>.m3u8')
+def get_stream(channel_name):
+    name_clean = channel_name.lower()
+
+    # A. PRIMA VERIFICA: Canale manuale in HOT-SWAP
+    if name_clean in MANUAL_STREAMS:
+        print(f"[MANUAL] Servendo flusso manuale: {name_clean}")
+        return redirect(MANUAL_STREAMS[name_clean], code=302)
+
+    # B. SECONDA VERIFICA: Mappa automatica (TVNow -> DamITV Failover)
+    if name_clean in AUTOMATIC_CHANNELS:
+        ch_info = AUTOMATIC_CHANNELS[name_clean]
+        
+        # 1. Tentativo TVNow
+        if ch_info.get("tvnow_id"):
+            tvnow_url = resolve_tvnow_stream(ch_info["tvnow_id"])
+            if tvnow_url:
+                print(f"[TVNOW SUCCESS] Canale: {name_clean}")
+                return redirect(tvnow_url, code=302)
+
+        # 2. Tentativo DamITV
+        if ch_info.get("damitv_id"):
+            damitv_url = resolve_damitv_stream(ch_info["damitv_id"])
+            if damitv_url:
+                print(f"[DAMITV SUCCESS] Canale: {name_clean}")
+                return redirect(damitv_url, code=302)
+
+    # C. TERZA VERIFICA: Invio diretto di ID numerico TVNow
+    if name_clean.isdigit():
+        direct_url = resolve_tvnow_stream(name_clean)
+        if direct_url:
+            return redirect(direct_url, code=302)
+
+    return f"Canale '{channel_name}' non disponibile o non trovato sui provider", 404
+
+# Endpoint diretto TVNow per ID
+@app.route('/tvnow/<channel_id>.m3u8')
+def get_tvnow_by_id(channel_id):
+    stream_url = resolve_tvnow_stream(channel_id)
+    if stream_url:
+        return redirect(stream_url, code=302)
+    return f"ID TVNow '{channel_id}' non disponibile", 404
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 8080))
