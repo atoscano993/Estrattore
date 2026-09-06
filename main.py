@@ -1,6 +1,7 @@
 import os
+import re
 import requests
-from flask import Flask, redirect, Response
+from flask import Flask, redirect, Response, jsonify
 
 app = Flask(__name__)
 
@@ -20,20 +21,128 @@ HEADERS_DAMITV = {
 }
 
 # ==========================================
-# 1. CANALI AUTOMATICI (Mappatura ID)
+# 1. CANALI AUTOMATICI (Nuovi ID DamITV)
 # ==========================================
 AUTOMATIC_CHANNELS = {
-    "sport24": {"tvnow_id": "869", "damitv_id": "premium869"},
-    "sportuno": {"tvnow_id": "461", "damitv_id": "premium461"},
-    "sportcalcio": {"tvnow_id": "870", "damitv_id": "premium870"},
-    "sportf1": {"tvnow_id": "577", "damitv_id": "premium577"},
-    "sportmoto": {"tvnow_id": "575", "damitv_id": "premium575"},
-    "sportmax": {"tvnow_id": "460", "damitv_id": "premium460"},
-    "sporttennis": {"tvnow_id": "576", "damitv_id": "premium576"},
-    "sportarena": {"tvnow_id": "462", "damitv_id": "premium462"},
-    "dazn1": {"tvnow_id": "877", "damitv_id": "premium877"}
+    "sport24": {"tvnow_id": "869", "damitv_id": "sky-sport-24"},
+    "sportuno": {"tvnow_id": "461", "damitv_id": "sky-sport-uno"},
+    "sportcalcio": {"tvnow_id": "870", "damitv_id": "sky-sport-calcio"},
+    "sportf1": {"tvnow_id": "577", "damitv_id": "sky-sport-f1"},
+    "sportmoto": {"tvnow_id": "575", "damitv_id": "sky-sport-motogp"},
+    "sportmax": {"tvnow_id": "460", "damitv_id": "sky-sport-max"},
+    "sporttennis": {"tvnow_id": "576", "damitv_id": "sky-sport-tennis"},
+    "sportarena": {"tvnow_id": "462", "damitv_id": "sky-sport-arena"},
+    "dazn1": {"tvnow_id": "877", "damitv_id": "dazn-1"}
 }
 
+# ==========================================
+# 2. CANALI MANUALI / HOT-SWAP
+# ==========================================
+MANUAL_STREAMS = {
+    "htsport_1": {
+        "url": "INSERISCI_URL_TOKEN_HTSPORT",
+        "referer": "https://motifguide.net/"
+    },
+    "forgemindly_1": {
+        "url": "INSERISCI_URL_TOKEN_FORGEMINDLY",
+        "referer": "https://forgemindly.com/"
+    }
+}
+
+# ==========================================
+# FUNZIONI DI RESOLUTION
+# ==========================================
+def resolve_tvnow_stream(stream_id):
+    try:
+        api_url = f"https://chat.cfbu247.sbs/api/resolve-dlstream/{stream_id}"
+        response = requests.get(api_url, headers=HEADERS_TVNOW, timeout=5)
+        if response.status_code == 200:
+            data = response.json()
+            return data.get("m3u8") or data.get("proxyPlaylistUrl")
+    except Exception as e:
+        print(f"[TVNOW ERROR] ID {stream_id}: {e}")
+    return None
+
+def resolve_damitv_stream(damitv_slug):
+    """Estrae l'm3u8 nativo dall'iframe di DamITV"""
+    try:
+        embed_url = f"https://damitv.st/embed/channel/?id={damitv_slug}"
+        res = requests.get(embed_url, headers=HEADERS_DAMITV, timeout=6)
+        
+        if res.status_code == 200:
+            # Cerca l'URL del file m3u8 all'interno del codice dell'iframe
+            match = re.search(r'["\'](https?://[^"\']+\.m3u8[^"\']*)["\']', res.text)
+            if match:
+                stream_url = match.group(1).replace(r'\/', '/')
+                print(f"[DAMITV SUCCESS] Estratto fluso: {stream_url}")
+                return stream_url
+                
+            # Fallback per m3u8 relativi o server alternativi
+            match_rel = re.search(r'file:\s*["\']([^"\']+\.m3u8[^"\']*)["\']', res.text)
+            if match_rel:
+                return match_rel.group(1).replace(r'\/', '/')
+    except Exception as e:
+        print(f"[DAMITV ERROR] Slug {damitv_slug}: {e}")
+    return None
+
+# ==========================================
+# ROTTE FLASK
+# ==========================================
+@app.route('/')
+def home():
+    return "Estrattore attivo (TVNow + DamITV + Manual Streams)", 200
+
+@app.route('/<channel_name>')
+def get_stream(channel_name):
+    name_clean = channel_name.replace(".m3u8", "").lower()
+
+    # A. CANALI MANUALI
+    if name_clean in MANUAL_STREAMS:
+        stream_data = MANUAL_STREAMS[name_clean]
+        if "http" not in stream_data["url"]:
+            return "Token manuale non impostato o invalido", 400
+            
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Referer": stream_data["referer"]
+        }
+        try:
+            req = requests.get(stream_data["url"], headers=headers, timeout=10)
+            if req.status_code == 200:
+                return Response(req.content, content_type='application/vnd.apple.mpegurl')
+            return f"Errore sorgente manuale: HTTP {req.status_code}", req.status_code
+        except Exception as e:
+            return f"Errore connessione sorgente: {e}", 500
+
+    # B. CANALI AUTOMATICI (TVNow -> DamITV Failover)
+    if name_clean in AUTOMATIC_CHANNELS:
+        ch_info = AUTOMATIC_CHANNELS[name_clean]
+        
+        # 1. Tentativo TVNow
+        if ch_info.get("tvnow_id"):
+            tvnow_url = resolve_tvnow_stream(ch_info["tvnow_id"])
+            if tvnow_url:
+                print(f"[TVNOW SUCCESS] Canale: {name_clean}")
+                return redirect(tvnow_url, code=302)
+
+        # 2. Tentativo DamITV (ora con estrazione automatica dall'iframe)
+        if ch_info.get("damitv_id"):
+            damitv_url = resolve_damitv_stream(ch_info["damitv_id"])
+            if damitv_url:
+                print(f"[DAMITV FAILOVER SUCCESS] Canale: {name_clean}")
+                return redirect(damitv_url, code=302)
+
+    # C. ID NUMERICO TVNOW DIRETTO
+    if name_clean.isdigit():
+        direct_url = resolve_tvnow_stream(name_clean)
+        if direct_url:
+            return redirect(direct_url, code=302)
+
+    return f"Nessun provider disponibile per '{channel_name}'", 503
+
+if __name__ == '__main__':
+    port = int(os.environ.get('PORT', 8080))
+    app.run(host='0.0.0.0', port=port)
 # ==========================================
 # 2. CANALI MANUALI / HOT-SWAP (Con Header Iniettati)
 # ==========================================
