@@ -218,3 +218,22 @@ def get_direct_event(event_slug):
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 8080))
     app.run(host='0.0.0.0', port=port)
+
+# ==========================================
+# ROTTA DI DEBUG TEMPORANEA
+# ==========================================
+@app.route('/debug-dami')
+def debug_dami():
+    target_id = request.args.get('id', 'seriea/2026-09-07/cag-lec')
+    embed_url = f"https://damitv.st/embed/?id={target_id}"
+    
+    try:
+        res = requests.get(embed_url, headers=HEADERS_DAMITV, timeout=10)
+        clean_html = res.text.replace('<', '&lt;').replace('>', '&gt;')
+        return f"<h3>Status Code: {res.status_code}</h3><pre>{clean_html}</pre>"
+    except Exception as e:
+        return f"Errore richiesta: {e}", 500
+
+if __name__ == '__main__':
+    port = int(os.environ.get('PORT', 8080))
+    app.run(host='0.0.0.0', port=port)
