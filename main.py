@@ -37,7 +37,7 @@ AUTOMATIC_CHANNELS = {
 }
 
 # ==========================================
-# 2. DIZIONARIO SQUADRE SERIE A (Frosinone & Sassuolo inclusi)
+# 2. DIZIONARIO SQUADRE SERIE A
 # ==========================================
 SERIE_A_TEAMS = {
     "atalanta": ["atalanta", "ata"],
