@@ -67,7 +67,7 @@ SERIE_A_TEAMS = {
 # ==========================================
 MANUAL_STREAMS = {
     "live_1": {
-        "url": "https://xameleon.phantemlis.top/one/secure/4202dae3386d85ab82acc9be1eb0fa0a/1788799130/premium877/index.m3u8",
+        "url": "https://xameleon.phantemlis.top/one/secure/2558a2cc2b74c2d3a4a2b799b4e82027/1788801011/premium877/tracks-v1a1/mono.m3u8",
         "referer": "https://hamis.romponalis.st/",
         "origin": "https://hamis.romponalis.st"
     },
