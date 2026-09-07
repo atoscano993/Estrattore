@@ -153,9 +153,11 @@ def debug_dami():
         return f"<h3>Stream Estratto con Successo:</h3><p>URL: {stream_found}</p><p><a href='/proxy?url={requests.utils.quote(stream_found)}'>Testa tramite Proxy</a></p>"
     return f"Impossibile estrarre lo stream per '{target_id}' tramite API.", 500
 
+from urllib.parse import urljoin
+
 @app.route('/proxy')
 def proxy_m3u8():
-    """Proxy HLS avanzato per gestire master playlist, sub-playlist e segmenti TS"""
+    """Proxy HLS con supporto CORS e riscrittura URL assoluti"""
     target_url = request.args.get('url')
     if not target_url:
         return "URL mancante", 400
@@ -164,10 +166,7 @@ def proxy_m3u8():
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         "Referer": "https://damitv.st/",
         "Origin": "https://damitv.st",
-        "Accept": "*/*",
-        "Sec-Fetch-Dest": "empty",
-        "Sec-Fetch-Mode": "cors",
-        "Sec-Fetch-Site": "cross-site"
+        "Accept": "*/*"
     }
 
     try:
@@ -175,36 +174,31 @@ def proxy_m3u8():
         if res.status_code == 200:
             content_type = res.headers.get('Content-Type', '')
             
-            # Se la risposta è una playlist m3u8 (Master o Media Playlist)
+            # Gestione Playlist M3U8
             if ".m3u8" in target_url or "mpegurl" in content_type or "apple" in content_type:
-                base_url = target_url.rsplit('/', 1)[0] + '/'
                 lines = res.text.splitlines()
                 new_lines = []
                 
                 for line in lines:
                     line_str = line.strip()
                     if line_str and not line_str.startswith('#'):
-                        # Costruisci l'URL assoluto per sub-playlist o segmenti .ts
-                        if line_str.startswith('http'):
-                            full_url = line_str
-                        elif line_str.startswith('/'):
-                            # Gestione percorso dalla radice del dominio
-                            domain_base = "/".join(target_url.split('/', 3)[:3])
-                            full_url = domain_base + line_str
-                        else:
-                            # Gestione percorso relativo
-                            full_url = base_url + line_str
-                        
-                        # Inoltra ogni risorsa interna nuovamente attraverso il proxy
+                        # Unisce in modo sicuro qualsiasi tipo di percorso relativo
+                        full_url = urljoin(target_url, line_str)
                         line_str = f"/proxy?url={requests.utils.quote(full_url)}"
-                    
                     new_lines.append(line_str)
                 
                 rewritten_m3u8 = "\n".join(new_lines)
-                return Response(rewritten_m3u8, mimetype='application/vnd.apple.mpegurl')
+                
+                # Risposta con Header CORS Abilitati
+                response = Response(rewritten_m3u8, mimetype='application/vnd.apple.mpegurl')
+                response.headers["Access-Control-Allow-Origin"] = "*"
+                response.headers["Access-Control-Allow-Headers"] = "*"
+                return response
             
-            # Se è un segmento video (.ts / .aac / .m4s) trasferisci il flusso direttamente
-            return Response(res.iter_content(chunk_size=1024*64), content_type=content_type or 'video/mp2t')
+            # Gestione Segmenti Video (.ts / .m4s)
+            response = Response(res.iter_content(chunk_size=1024*64), content_type=content_type or 'video/mp2t')
+            response.headers["Access-Control-Allow-Origin"] = "*"
+            return response
         else:
             return f"Errore remoto: {res.status_code}", res.status_code
     except Exception as e:
