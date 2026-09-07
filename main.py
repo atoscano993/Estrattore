@@ -160,7 +160,6 @@ def proxy_m3u8():
     if not target_url:
         return "URL mancante", 400
     
-    # Header specifici emulati dal player JS ufficiale
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         "Referer": "https://damitv.st/",
@@ -194,13 +193,6 @@ def proxy_m3u8():
                 rewritten_m3u8 = "\n".join(new_lines)
                 return Response(rewritten_m3u8, mimetype='application/vnd.apple.mpegurl')
             
-            return Response(res.iter_content(chunk_size=1024*64), content_type=content_type)
-        else:
-            return f"Errore remoto: {res.status_code}", res.status_code
-    except Exception as e:
-        return f"Errore Proxy: {e}", 500
-            
-            # Se è un segmento video (.ts) inoltra il flusso di byte
             return Response(res.iter_content(chunk_size=1024*64), content_type=content_type)
         else:
             return f"Errore remoto: {res.status_code}", res.status_code
