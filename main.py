@@ -67,12 +67,12 @@ SERIE_A_TEAMS = {
 # ==========================================
 MANUAL_STREAMS = {
     "live_1": {
-        "url": "	https://xameleon.phantemlis.top/one/secure/4202dae3386d85ab82acc9be1eb0fa0a/1788799130/premium877/index.m3u8",
-        "referer": "	https://hamis.romponalis.st/"
+        "url": "https://xameleon.phantemlis.top/one/secure/4202dae3386d85ab82acc9be1eb0fa0a/1788799130/premium877/index.m3u8",
+        "referer": "https://hamis.romponalis.st/"
     },
     "live_2": {
-        "url": "	https://gr676m.l948728p57nx.net:8443/hls/g8yy3cfv128h5.m3u8?s=HPc9CMpPnr4_Whd8Il_FGA&e=1788810115",
-        "referer": "	https://cuttingfame.net/"
+        "url": "https://gr676m.l948728p57nx.net:8443/hls/g8yy3cfv128h5.m3u8?s=HPc9CMpPnr4_Whd8Il_FGA&e=1788810115",
+        "referer": "https://cuttingfame.net/"
     }
 }
 
