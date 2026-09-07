@@ -63,16 +63,16 @@ SERIE_A_TEAMS = {
 }
 
 # ==========================================
-# 3. CANALI MANUALI / HOT-SWAP
+# 3. CANALI MANUALI / HOT-SWAP (Modifica qui i tuoi flussi)
 # ==========================================
 MANUAL_STREAMS = {
     "live_1": {
-        "url": "https://xameleon.phantemlis.top/one/secure/e122ca4ef317b3cb0b2599ccf47b51dc/1788800150/premium877/tracks-v1a1/mono.m3u8",
+        "url": "https://xameleon.phantemlis.top/one/secure/4202dae3386d85ab82acc9be1eb0fa0a/1788799130/premium877/index.m3u8",
         "referer": "https://hamis.romponalis.st/",
-         "origin": "https://hamis.romponalis.st"
+        "origin": "https://hamis.romponalis.st"
     },
     "live_2": {
-        "url": "https://gr676m.l948728p57nx.net:8443/hls/g8yy3cfv128h5.m3u8?s=0MjhiTrfx1_ZdG9xqtj9ig&e=1788810876",
+        "url": "https://gr676m.l948728p57nx.net:8443/hls/g8yy3cfv128h5.m3u8?s=HPc9CMpPnr4_Whd8Il_FGA&e=1788810115",
         "referer": "https://cuttingfame.net/",
         "origin": "https://cuttingfame.net"
     }
@@ -94,7 +94,7 @@ def resolve_tvnow_stream(stream_id):
     return None
 
 def resolve_damitv_stream(damitv_id):
-    """Estrae l'm3u8 nativo dall'embed di DamITV (sia canali H24 che eventi live)"""
+    """Estrae l'm3u8 nativo dall'embed di DamITV"""
     try:
         if "/" in damitv_id:
             embed_url = f"https://damitv.st/embed/?id={damitv_id}"
@@ -115,7 +115,7 @@ def resolve_damitv_stream(damitv_id):
     return None
 
 def find_damitv_match_by_team(team_key):
-    """Scraper avanzato per il palinsesto DamITV"""
+    """Scraper per il palinsesto DamITV"""
     try:
         keywords = SERIE_A_TEAMS.get(team_key, [team_key])
         schedule_url = "https://damitv.st/schedule/"
@@ -142,14 +142,14 @@ def find_damitv_match_by_team(team_key):
 def home():
     return "Estrattore attivo (TVNow + DamITV + Eventi Live Serie A + Manual Streams)", 200
 
-# Rotta principale per canali, squadre e flussi manuali
 @app.route('/<channel_name>')
 def get_stream(channel_name):
     name_clean = channel_name.replace(".m3u8", "").lower()
 
-# A. Canali Manuali (Hot-Swap)
+    # A. Canali Manuali (Hot-Swap)
     if name_clean in MANUAL_STREAMS:
         stream_data = MANUAL_STREAMS[name_clean]
+        
         url_clean = stream_data["url"].strip()
         referer_clean = stream_data["referer"].strip()
         origin_clean = stream_data.get("origin", referer_clean).strip()
