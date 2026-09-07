@@ -77,29 +77,59 @@ def resolve_tvnow_stream(stream_id):
     return None
 
 def resolve_damitv_stream(damitv_id):
-    """Estrae l'm3u8 nativo dall'embed di DamITV facendosi carico di id con percorsi (es. seriea/2026-09-07/cag-lec)"""
+    """Estrae l'm3u8 nativo dall'embed di DamITV, inclusi iframe nidificati e sorgenti dinamiche"""
     try:
-        # Pulisce eventuali prefissi ridondanti
         clean_id = damitv_id.lstrip('/')
         
+        # 1. Costruzione corretta dell'URL dell'embed
         if clean_id.startswith("http"):
-            embed_url = clean_id
+            embed_urls = [clean_id]
+        elif clean_id.startswith("seriea/") or clean_id.startswith("event/") or clean_id.startswith("embed/"):
+            embed_urls = [
+                f"https://damitv.st/embed/{clean_id}",
+                f"https://damitv.st/{clean_id}",
+                f"https://damitv.st/embed/?id={clean_id}"
+            ]
         elif "/" in clean_id:
-            embed_url = f"https://damitv.st/embed/?id={clean_id}"
+            embed_urls = [f"https://damitv.st/embed/?id={clean_id}", f"https://damitv.st/{clean_id}"]
         else:
-            embed_url = f"https://damitv.st/embed/channel/?id={clean_id}"
+            embed_urls = [f"https://damitv.st/embed/channel/?id={clean_id}"]
 
-        res = requests.get(embed_url, headers=HEADERS_DAMITV, timeout=6)
-        if res.status_code == 200:
-            match = re.search(r'["\'](https?://[^"\']+\.m3u8[^"\']*)["\']', res.text)
-            if match:
-                return match.group(1).replace(r'\/', '/')
-            
-            match_rel = re.search(r'file:\s*["\']([^"\']+\.m3u8[^"\']*)["\']', res.text)
-            if match_rel:
-                return match_rel.group(1).replace(r'\/', '/')
+        for embed_url in embed_urls:
+            res = requests.get(embed_url, headers=HEADERS_DAMITV, timeout=6)
+            if res.status_code == 200:
+                html = res.text
+                
+                # Cerca l'm3u8 diretto nel codice
+                match = re.search(r'["\'](https?://[^"\']+\.m3u8[^"\']*)["\']', html)
+                if match:
+                    return match.group(1).replace(r'\/', '/')
+
+                # Cerca all'interno di configurazioni JS (file: "...", source: "...")
+                match_js = re.search(r'(?:file|source|src)\s*:\s*["\']([^"\']+\.m3u8[^"\']*)["\']', html, re.IGNORECASE)
+                if match_js:
+                    return match_js.group(1).replace(r'\/', '/')
+
+                # Se c'è un iframe interno al player, lo segue (nested iframe)
+                iframe_match = re.search(r'<iframe[^>]+src=["\']([^"\']+)["\']', html, re.IGNORECASE)
+                if iframe_match:
+                    iframe_url = iframe_match.group(1)
+                    if iframe_url.startswith('//'):
+                        iframe_url = 'https:' + iframe_url
+                    elif iframe_url.startswith('/'):
+                        iframe_url = 'https://damitv.st' + iframe_url
+                    
+                    sub_res = requests.get(iframe_url, headers=HEADERS_DAMITV, timeout=6)
+                    if sub_res.status_code == 200:
+                        sub_match = re.search(r'["\'](https?://[^"\']+\.m3u8[^"\']*)["\']', sub_res.text)
+                        if sub_match:
+                            return sub_match.group(1).replace(r'\/', '/')
+                            
+                        sub_js = re.search(r'(?:file|source|src)\s*:\s*["\']([^"\']+\.m3u8[^"\']*)["\']', sub_res.text, re.IGNORECASE)
+                        if sub_js:
+                            return sub_js.group(1).replace(r'\/', '/')
     except Exception as e:
-        print(f"[DAMITV ERROR] ID {damitv_id}: {e}")
+        print(f"[DAMITV RESOLVE ERROR] ID {damitv_id}: {e}")
     return None
 
 def find_damitv_match_by_team(team_key):
