@@ -67,12 +67,14 @@ SERIE_A_TEAMS = {
 # ==========================================
 MANUAL_STREAMS = {
     "live_1": {
-        "url": "https://xameleon.phantemlis.top/one/secure/4202dae3386d85ab82acc9be1eb0fa0a/1788799130/premium877/index.m3u8",
-        "referer": "https://hamis.romponalis.st/"
+        "url": "https://xameleon.phantemlis.top/one/secure/e122ca4ef317b3cb0b2599ccf47b51dc/1788800150/premium877/tracks-v1a1/mono.m3u8",
+        "referer": "https://hamis.romponalis.st/",
+         "origin": "https://hamis.romponalis.st"
     },
     "live_2": {
-        "url": "https://gr676m.l948728p57nx.net:8443/hls/g8yy3cfv128h5.m3u8?s=HPc9CMpPnr4_Whd8Il_FGA&e=1788810115",
-        "referer": "https://cuttingfame.net/"
+        "url": "https://gr676m.l948728p57nx.net:8443/hls/g8yy3cfv128h5.m3u8?s=0MjhiTrfx1_ZdG9xqtj9ig&e=1788810876",
+        "referer": "https://cuttingfame.net/",
+        "origin": "https://cuttingfame.net"
     }
 }
 
@@ -145,18 +147,23 @@ def home():
 def get_stream(channel_name):
     name_clean = channel_name.replace(".m3u8", "").lower()
 
-    # A. Canali Manuali (Hot-Swap)
+# A. Canali Manuali (Hot-Swap)
     if name_clean in MANUAL_STREAMS:
         stream_data = MANUAL_STREAMS[name_clean]
-        if "http" not in stream_data["url"]:
+        url_clean = stream_data["url"].strip()
+        referer_clean = stream_data["referer"].strip()
+        origin_clean = stream_data.get("origin", referer_clean).strip()
+
+        if "http" not in url_clean:
             return "Token manuale non impostato o invalido", 400
             
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            "Referer": stream_data["referer"]
+            "Referer": referer_clean,
+            "Origin": origin_clean
         }
         try:
-            req = requests.get(stream_data["url"], headers=headers, timeout=10)
+            req = requests.get(url_clean, headers=headers, timeout=10)
             if req.status_code == 200:
                 return Response(req.content, content_type='application/vnd.apple.mpegurl')
             return f"Errore sorgente manuale: HTTP {req.status_code}", req.status_code
