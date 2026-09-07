@@ -77,57 +77,63 @@ def resolve_tvnow_stream(stream_id):
     return None
 
 def resolve_damitv_stream(damitv_id):
-    """Estrae l'm3u8 nativo dall'embed di DamITV, inclusi iframe nidificati e sorgenti dinamiche"""
+    """Estrae l'm3u8 da DamITV effettuando prima l'estrazione delle API o dei dati JSON interni"""
     try:
         clean_id = damitv_id.lstrip('/')
         
-        # 1. Costruzione corretta dell'URL dell'embed
+        # 1. Costruzione URL embed
         if clean_id.startswith("http"):
-            embed_urls = [clean_id]
-        elif clean_id.startswith("seriea/") or clean_id.startswith("event/") or clean_id.startswith("embed/"):
-            embed_urls = [
-                f"https://damitv.st/embed/{clean_id}",
-                f"https://damitv.st/{clean_id}",
-                f"https://damitv.st/embed/?id={clean_id}"
-            ]
+            embed_url = clean_id
         elif "/" in clean_id:
-            embed_urls = [f"https://damitv.st/embed/?id={clean_id}", f"https://damitv.st/{clean_id}"]
+            embed_url = f"https://damitv.st/embed/?id={clean_id}"
         else:
-            embed_urls = [f"https://damitv.st/embed/channel/?id={clean_id}"]
+            embed_url = f"https://damitv.st/embed/channel/?id={clean_id}"
 
-        for embed_url in embed_urls:
-            res = requests.get(embed_url, headers=HEADERS_DAMITV, timeout=6)
-            if res.status_code == 200:
-                html = res.text
+        res = requests.get(embed_url, headers=HEADERS_DAMITV, timeout=6)
+        if res.status_code == 200:
+            html = res.text
+
+            # --- METODO 1: Chiamata diretta all'API JSON interna se presente ---
+            # DamITV passa spesso dati in JSON o endpoint /api/
+            api_matches = re.findall(r'fetch\(["\']([^"\']+)["\']', html)
+            for api_path in api_matches:
+                if not api_path.startswith("http"):
+                    api_path = "https://damitv.st" + (api_path if api_path.startswith("/") else "/" + api_path)
+                try:
+                    api_res = requests.get(api_path, headers=HEADERS_DAMITV, timeout=5)
+                    if api_res.status_code == 200:
+                        data = api_res.json()
+                        stream_found = data.get("hlsUrl") or data.get("sdUrl") or data.get("url") or data.get("m3u8")
+                        if stream_found:
+                            return stream_found
+                except Exception:
+                    pass
+
+            # --- METODO 2: Estrazione diretta di oggetti JSON / HLS dall'HTML ---
+            # Cerca chiavi hlsUrl/sdUrl/file/source
+            hls_matches = re.findall(r'["\'](?:hlsUrl|sdUrl|file|source|url)["\']\s*:\s*["\']([^"\']+)["\']', html, re.IGNORECASE)
+            for match_url in hls_matches:
+                clean_url = match_url.replace(r'\/', '/')
+                if "http" in clean_url or ".m3u8" in clean_url:
+                    return clean_url
+
+            # --- METODO 3: Fallback Regex per qualsiasi URL http che finisce in .m3u8 ---
+            match_m3u8 = re.search(r'["\'](https?://[^"\']+\.m3u8[^"\']*)["\']', html)
+            if match_m3u8:
+                return match_m3u8.group(1).replace(r'\/', '/')
+
+            # --- METODO 4: Verifica Iframe Nidificato ---
+            iframe_match = re.search(r'<iframe[^>]+src=["\']([^"\']+)["\']', html, re.IGNORECASE)
+            if iframe_match:
+                sub_url = iframe_match.group(1)
+                if sub_url.startswith('//'):
+                    sub_url = 'https:' + sub_url
+                elif sub_url.startswith('/'):
+                    sub_url = 'https://damitv.st' + sub_url
                 
-                # Cerca l'm3u8 diretto nel codice
-                match = re.search(r'["\'](https?://[^"\']+\.m3u8[^"\']*)["\']', html)
-                if match:
-                    return match.group(1).replace(r'\/', '/')
+                # Ricorsione sull'iframe interno
+                return resolve_damitv_stream(sub_url)
 
-                # Cerca all'interno di configurazioni JS (file: "...", source: "...")
-                match_js = re.search(r'(?:file|source|src)\s*:\s*["\']([^"\']+\.m3u8[^"\']*)["\']', html, re.IGNORECASE)
-                if match_js:
-                    return match_js.group(1).replace(r'\/', '/')
-
-                # Se c'è un iframe interno al player, lo segue (nested iframe)
-                iframe_match = re.search(r'<iframe[^>]+src=["\']([^"\']+)["\']', html, re.IGNORECASE)
-                if iframe_match:
-                    iframe_url = iframe_match.group(1)
-                    if iframe_url.startswith('//'):
-                        iframe_url = 'https:' + iframe_url
-                    elif iframe_url.startswith('/'):
-                        iframe_url = 'https://damitv.st' + iframe_url
-                    
-                    sub_res = requests.get(iframe_url, headers=HEADERS_DAMITV, timeout=6)
-                    if sub_res.status_code == 200:
-                        sub_match = re.search(r'["\'](https?://[^"\']+\.m3u8[^"\']*)["\']', sub_res.text)
-                        if sub_match:
-                            return sub_match.group(1).replace(r'\/', '/')
-                            
-                        sub_js = re.search(r'(?:file|source|src)\s*:\s*["\']([^"\']+\.m3u8[^"\']*)["\']', sub_res.text, re.IGNORECASE)
-                        if sub_js:
-                            return sub_js.group(1).replace(r'\/', '/')
     except Exception as e:
         print(f"[DAMITV RESOLVE ERROR] ID {damitv_id}: {e}")
     return None
