@@ -1,10 +1,13 @@
 import os
 import re
 import requests
-from flask import Flask, redirect, request
+from flask import Flask, redirect, Response, request
 
 app = Flask(__name__)
 
+# ==========================================
+# CONFIGURAZIONE HEADERS STANDARD
+# ==========================================
 HEADERS_TVNOW = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     "Referer": "https://tvnow247.top/",
@@ -53,6 +56,9 @@ SERIE_A_TEAMS = {
     "venezia": ["venezia", "ven"]
 }
 
+# ==========================================
+# FUNZIONI DI RESOLUTION
+# ==========================================
 def resolve_tvnow_stream(stream_id):
     try:
         api_url = f"https://chat.cfbu247.sbs/api/resolve-dlstream/{stream_id}"
@@ -65,32 +71,26 @@ def resolve_tvnow_stream(stream_id):
     return None
 
 def resolve_damitv_stream(damitv_id):
-    """Estrae l'm3u8 reale da DamITV emulando il flusso di chiamate ad-session / ad-verify / extract-url"""
+    """Estrae l'm3u8 nativo tramite API interne di DamITV"""
     try:
         clean_id = damitv_id.lstrip('/')
-        
-        # Gestione ID con percorsi (es: seriea/2026-09-07/cag-lec -> estrae l'ID o usa l'intero slug)
         match_id = clean_id.split('/')[-1] if '/' in clean_id else clean_id
 
-        # Sessione HTTP con gli stessi cookie/headers del browser
         session = requests.Session()
         session.headers.update(HEADERS_DAMITV)
 
-        # 1. Recupera ad-session
         token = ""
         try:
             r_sess = session.get("https://damitv.st/papi/ad-session", timeout=5)
             if r_sess.status_code == 200:
                 sid = r_sess.json().get("s", "")
                 if sid:
-                    # 2. Verifica sessione per ottenere il token
                     r_ver = session.get(f"https://damitv.st/papi/ad-verify?s={sid}", timeout=5)
                     if r_ver.status_code == 200:
                         token = r_ver.json().get("t", "")
         except Exception as e:
             print(f"[DAMITV TOKEN WARN] {e}")
 
-        # 3. Se l'ID è un canale TV (es. ch=...)
         if "ch=" in clean_id or clean_id.startswith("sky-") or clean_id.startswith("dazn-"):
             ch_id = clean_id.replace("ch=", "")
             url_ch = f"https://damitv.st/papi/tv/resolve/{ch_id}?t={token}"
@@ -100,12 +100,10 @@ def resolve_damitv_stream(damitv_id):
                 if data.get("stream") or data.get("url"):
                     return data.get("stream") or data.get("url")
 
-        # 4. Estrazione URL per Evento / Partita
         extract_url = f"https://damitv.st/papi/extract-url/{clean_id}"
         r_ext = session.get(extract_url, timeout=5)
         
         if r_ext.status_code != 200 and match_id != clean_id:
-            # Riprova con il solo match_id finale
             extract_url = f"https://damitv.st/papi/extract-url/{match_id}"
             r_ext = session.get(extract_url, timeout=5)
 
@@ -140,39 +138,53 @@ def find_damitv_match_by_team(team_key):
     return None
 
 # ==========================================
-# ROTTE FLASK (In ordine di priorità)
+# ROTTE FLASK
 # ==========================================
 @app.route('/')
 def home():
     return "Estrattore attivo (TVNow + DamITV)", 200
 
-# ROTTA DI DEBUG (In alto per evitare sovrapposizioni)
-@app.route('/debug-dami')
-def debug_dami():
-    target_id = request.args.get('id', 'seriea/2026-09-07/cag-lec')
-    stream_found = resolve_damitv_stream(target_id)
-    if stream_found:
-        return f"<h3>Stream Estratto con Successo:</h3><a href='{stream_found}'>{stream_found}</a>"
-    return f"Impossibile estrarre lo stream per '{target_id}' tramite API.", 500
+@app.route('/proxy')
+def proxy_m3u8():
+    """Proxy trasparente: legge la playlist da DamITV mantenendo lo stesso IP e Referer"""
+    target_url = request.args.get('url')
+    if not target_url:
+        return "URL mancante", 400
+    
+    try:
+        res = requests.get(target_url, headers=HEADERS_DAMITV, timeout=10)
+        if res.status_code == 200:
+            # Riscrittura URL relativi per i segmenti di video .ts
+            base_url = target_url.rsplit('/', 1)[0] + '/'
+            content = res.text
+            
+            lines = content.splitlines()
+            new_lines = []
+            for line in lines:
+                line_str = line.strip()
+                if line_str and not line_str.startswith('#'):
+                    if not line_str.startswith('http'):
+                        line_str = base_url + line_str
+                new_lines.append(line_str)
+            
+            rewritten_m3u8 = "\n".join(new_lines)
+            return Response(rewritten_m3u8, mimetype='application/vnd.apple.mpegurl')
+        else:
+            return f"Errore remoto: {res.status_code}", res.status_code
+    except Exception as e:
+        return f"Errore Proxy: {e}", 500
 
-@app.route('/event/<path:event_slug>')
-def get_direct_event(event_slug):
-    clean_slug = event_slug.replace(".m3u8", "")
-    stream_url = resolve_damitv_stream(clean_slug)
-    if stream_url:
-        return redirect(stream_url, code=302)
-    return f"Impossibile estrarre lo stream per '{clean_slug}'", 404
-
-# ROTTA CATCH-ALL (In fondo per non sovrascrivere le altre rotte)
 @app.route('/<channel_name>')
 def get_stream(channel_name):
     name_clean = channel_name.replace(".m3u8", "").lower()
 
+    # 1. Partita Serie A (Servita tramite Proxy interno per evitare IP Lock 403)
     if name_clean in SERIE_A_TEAMS:
         stream_url = find_damitv_match_by_team(name_clean)
         if stream_url:
-            return redirect(stream_url, code=302)
+            return redirect(f"/proxy?url={requests.utils.quote(stream_url)}", code=302)
 
+    # 2. Canali Automatici H24
     if name_clean in AUTOMATIC_CHANNELS:
         ch_info = AUTOMATIC_CHANNELS[name_clean]
         if ch_info.get("tvnow_id"):
@@ -182,14 +194,23 @@ def get_stream(channel_name):
         if ch_info.get("damitv_id"):
             damitv_url = resolve_damitv_stream(ch_info["damitv_id"])
             if damitv_url:
-                return redirect(damitv_url, code=302)
+                return redirect(f"/proxy?url={requests.utils.quote(damitv_url)}", code=302)
 
+    # 3. ID Numerico TVNow Diretto
     if name_clean.isdigit():
         direct_url = resolve_tvnow_stream(name_clean)
         if direct_url:
             return redirect(direct_url, code=302)
 
     return f"Nessun evento disponibile per '{channel_name}'", 503
+
+@app.route('/event/<path:event_slug>')
+def get_direct_event(event_slug):
+    clean_slug = event_slug.replace(".m3u8", "")
+    stream_url = resolve_damitv_stream(clean_slug)
+    if stream_url:
+        return redirect(f"/proxy?url={requests.utils.quote(stream_url)}", code=302)
+    return f"Impossibile estrarre lo stream per '{clean_slug}'", 404
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 8080))
