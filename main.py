@@ -1,7 +1,8 @@
 import os
 import re
+import base64
 import requests
-from flask import Flask, redirect, Response, jsonify
+from flask import Flask, redirect, Response, request, jsonify
 
 app = Flask(__name__)
 
@@ -67,11 +68,11 @@ SERIE_A_TEAMS = {
 # ==========================================
 MANUAL_STREAMS = {
     "live_1": {
-        "url": "https://xameleon.phantemlis.top/one/secure/2558a2cc2b74c2d3a4a2b799b4e82027/1788801011/premium877/tracks-v1a1/mono.m3u8",
+        "url": "https://xameleon.phantemlis.top/one/secure/ba4950892b27ef57b673d1638435fddb/1788801979/premium877/tracks-v1a1/mono.m3u8",
         "referer": "https://hamis.romponalis.st/"
     },
     "live_2": {
-        "url": "https://gr676m.l948728p57nx.net:8443/hls/g8yy3cfv128h5.m3u8?s=WUXMiwJhozQaC7JOTKJkFQ&e=1788811358",
+        "url": "https://gr676m.l948728p57nx.net:8443/hls/g8yy3cfv128h5.m3u8?s=PKBQ0Lce9OMbqRL6yb8ozg&e=1788812756",
         "referer": "https://cuttingfame.net/"
     }
 }
@@ -138,13 +139,13 @@ def find_damitv_match_by_team(team_key):
 # ==========================================
 @app.route('/')
 def home():
-    return "Estrattore attivo (TVNow + DamITV + Eventi Live Serie A + Manual Streams)", 200
+    return "Estrattore attivo (TVNow + DamITV + Eventi Live Serie A + Manual Streams Proxy)", 200
 
 @app.route('/<channel_name>')
 def get_stream(channel_name):
     name_clean = channel_name.replace(".m3u8", "").lower()
 
-# A. Canali Manuali (Hot-Swap via URL Parameter Redirect)
+    # A. Canali Manuali (Full Reverse Proxy + Segment Rewriting)
     if name_clean in MANUAL_STREAMS:
         stream_data = MANUAL_STREAMS[name_clean]
         url_clean = stream_data["url"].strip()
@@ -153,14 +154,42 @@ def get_stream(channel_name):
         if "http" not in url_clean:
             return "Token manuale non impostato o invalido", 400
 
-        # Concatena il referer all'URL per istruire direttamente il lettore IPTV
-        if "?" in url_clean:
-            redirect_url = f"{url_clean}|Referer={referer_clean}"
-        else:
-            redirect_url = f"{url_clean}?|Referer={referer_clean}"
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Referer": referer_clean,
+            "Origin": referer_clean.rstrip('/')
+        }
 
-        print(f"[MANUAL REDIRECT] Reindirizzamento a: {redirect_url}")
-        return redirect(redirect_url, code=302)
+        try:
+            res = requests.get(url_clean, headers=headers, timeout=10)
+            if res.status_code == 200:
+                content = res.text
+                base_url = url_clean.rsplit('/', 1)[0] + '/'
+                
+                # Riscrive le righe del manifesto .m3u8 per far passare i segmenti .ts dal proxy
+                new_lines = []
+                for line in content.splitlines():
+                    line_str = line.strip()
+                    if line_str and not line_str.startswith('#'):
+                        if not line_str.startswith('http'):
+                            full_segment_url = base_url + line_str
+                        else:
+                            full_segment_url = line_str
+                        
+                        encoded_url = base64.b64encode(full_segment_url.encode()).decode()
+                        encoded_ref = base64.b64encode(referer_clean.encode()).decode()
+                        
+                        proxy_ts_url = f"/ts_proxy?url={encoded_url}&ref={encoded_ref}"
+                        new_lines.append(proxy_ts_url)
+                    else:
+                        new_lines.append(line)
+
+                rewritten_m3u8 = "\n".join(new_lines)
+                return Response(rewritten_m3u8, content_type='application/vnd.apple.mpegurl')
+            
+            return f"Errore sorgente manuale: HTTP {res.status_code}", res.status_code
+        except Exception as e:
+            return f"Errore connessione sorgente: {e}", 500
 
     # B. Partita Squadra Serie A (Scraping automatico)
     if name_clean in SERIE_A_TEAMS:
@@ -194,6 +223,32 @@ def get_stream(channel_name):
             return redirect(direct_url, code=302)
 
     return f"Nessun evento o canale disponibile per '{channel_name}'", 503
+
+# ==========================================
+# ROTTA DI PROXY PER I SEGMENTI VIDEO (.TS)
+# ==========================================
+@app.route('/ts_proxy')
+def ts_proxy():
+    encoded_url = request.args.get('url')
+    encoded_ref = request.args.get('ref')
+    
+    if not encoded_url or not encoded_ref:
+        return "Parametri mancanti", 400
+
+    try:
+        target_url = base64.b64decode(encoded_url).decode()
+        referer_url = base64.b64decode(encoded_ref).decode()
+
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Referer": referer_url,
+            "Origin": referer_url.rstrip('/')
+        }
+
+        req = requests.get(target_url, headers=headers, stream=True, timeout=10)
+        return Response(req.iter_content(chunk_size=1024*8), content_type=req.headers.get('Content-Type', 'video/MP2T'))
+    except Exception as e:
+        return f"Errore segmento TS: {e}", 500
 
 # Rotta di riserva per inserire lo slug dell'evento manualmente dall'URL
 @app.route('/event/<path:event_slug>')
