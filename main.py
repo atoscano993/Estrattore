@@ -155,17 +155,28 @@ def debug_dami():
 
 @app.route('/proxy')
 def proxy_m3u8():
-    """Proxy trasparente per playlist m3u8 e segmenti ts (per aggirare l'IP-Lock di DamITV)"""
+    """Proxy con spoofing completo degli header di DamITV"""
     target_url = request.args.get('url')
     if not target_url:
         return "URL mancante", 400
     
+    # Header specifici emulati dal player JS ufficiale
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Referer": "https://damitv.st/",
+        "Origin": "https://damitv.st",
+        "Accept": "*/*",
+        "Accept-Language": "it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7",
+        "Sec-Fetch-Dest": "empty",
+        "Sec-Fetch-Mode": "cors",
+        "Sec-Fetch-Site": "same-site"
+    }
+
     try:
-        res = requests.get(target_url, headers=HEADERS_DAMITV, timeout=10, stream=True)
+        res = requests.get(target_url, headers=headers, timeout=10, stream=True)
         if res.status_code == 200:
             content_type = res.headers.get('Content-Type', '')
             
-            # Se è una playlist m3u8 reindirizza le chiamate dei segmenti verso il nostro proxy
             if ".m3u8" in target_url or "mpegurl" in content_type:
                 base_url = target_url.rsplit('/', 1)[0] + '/'
                 lines = res.text.splitlines()
@@ -182,6 +193,12 @@ def proxy_m3u8():
                 
                 rewritten_m3u8 = "\n".join(new_lines)
                 return Response(rewritten_m3u8, mimetype='application/vnd.apple.mpegurl')
+            
+            return Response(res.iter_content(chunk_size=1024*64), content_type=content_type)
+        else:
+            return f"Errore remoto: {res.status_code}", res.status_code
+    except Exception as e:
+        return f"Errore Proxy: {e}", 500
             
             # Se è un segmento video (.ts) inoltra il flusso di byte
             return Response(res.iter_content(chunk_size=1024*64), content_type=content_type)
