@@ -77,13 +77,24 @@ def resolve_tvnow_stream(stream_id):
     return None
 
 def resolve_damitv_stream(damitv_id):
+    """Estrae l'm3u8 nativo dall'embed di DamITV facendosi carico di id con percorsi (es. seriea/2026-09-07/cag-lec)"""
     try:
-        embed_url = f"https://damitv.st/embed/?id={damitv_id}" if "/" in damitv_id else f"https://damitv.st/embed/channel/?id={damitv_id}"
+        # Pulisce eventuali prefissi ridondanti
+        clean_id = damitv_id.lstrip('/')
+        
+        if clean_id.startswith("http"):
+            embed_url = clean_id
+        elif "/" in clean_id:
+            embed_url = f"https://damitv.st/embed/?id={clean_id}"
+        else:
+            embed_url = f"https://damitv.st/embed/channel/?id={clean_id}"
+
         res = requests.get(embed_url, headers=HEADERS_DAMITV, timeout=6)
         if res.status_code == 200:
             match = re.search(r'["\'](https?://[^"\']+\.m3u8[^"\']*)["\']', res.text)
             if match:
                 return match.group(1).replace(r'\/', '/')
+            
             match_rel = re.search(r'file:\s*["\']([^"\']+\.m3u8[^"\']*)["\']', res.text)
             if match_rel:
                 return match_rel.group(1).replace(r'\/', '/')
@@ -92,18 +103,32 @@ def resolve_damitv_stream(damitv_id):
     return None
 
 def find_damitv_match_by_team(team_key):
+    """Cerca nel palinsesto di DamITV tutti i match corrispondenti alle keyword della squadra"""
     try:
         keywords = SERIE_A_TEAMS.get(team_key, [team_key])
         schedule_url = "https://damitv.st/schedule/"
         res = requests.get(schedule_url, headers=HEADERS_DAMITV, timeout=6)
         if res.status_code == 200:
             html_content = res.text.lower()
-            found_urls = re.findall(r'(?:href=["\']|id=)([^"\'\s>]*(?:seriea|embed|event)[^"\'\s>]*)', html_content, re.IGNORECASE)
+            # Cerca pattern che contengono href o id con parametri
+            found_urls = re.findall(r'(?:href=["\']|id=)([^"\'\s>]*?(?:seriea|embed|event)[^"\'\s>]*)', html_content, re.IGNORECASE)
+            
             for url_str in found_urls:
                 for kw in keywords:
                     if kw in url_str:
-                        slug = url_str.split("id=")[-1].strip("/").lstrip("?")
-                        return slug
+                        # Estrae lo slug pulito (es: seriea/2026-09-07/cag-lec)
+                        if "id=" in url_str:
+                            slug = url_str.split("id=")[-1]
+                        else:
+                            slug = url_str
+                        
+                        slug = slug.strip("/").lstrip("?")
+                        print(f"[SCRAPER SUCCESS] Trovato candidato per {team_key}: {slug}")
+                        
+                        # Verifica se dallo slug si ottiene uno stream m3u8 valido
+                        stream_url = resolve_damitv_stream(slug)
+                        if stream_url:
+                            return stream_url
     except Exception as e:
         print(f"[SCRAPER ERROR] {team_key}: {e}")
     return None
@@ -121,11 +146,10 @@ def get_stream(channel_name):
 
     # 1. Partita Squadra Serie A
     if name_clean in SERIE_A_TEAMS:
-        event_slug = find_damitv_match_by_team(name_clean)
-        if event_slug:
-            stream_url = resolve_damitv_stream(event_slug)
-            if stream_url:
-                return redirect(stream_url, code=302)
+        stream_url = find_damitv_match_by_team(name_clean)
+        if stream_url:
+            print(f"[MATCH SUCCESS] Reindirizzamento diretto a: {stream_url}")
+            return redirect(stream_url, code=302)
 
     # 2. Canali Automatici H24 (TVNow -> DamITV Failover)
     if name_clean in AUTOMATIC_CHANNELS:
