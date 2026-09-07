@@ -144,45 +144,23 @@ def home():
 def get_stream(channel_name):
     name_clean = channel_name.replace(".m3u8", "").lower()
 
-# A. Canali Manuali (Hot-Swap via Full Reverse Proxy)
+# A. Canali Manuali (Hot-Swap via URL Parameter Redirect)
     if name_clean in MANUAL_STREAMS:
         stream_data = MANUAL_STREAMS[name_clean]
-        
         url_clean = stream_data["url"].strip()
         referer_clean = stream_data["referer"].strip()
-        # Se non specifichi l'origin, viene ricavato dal referer (es. https://cuttingfame.net)
-        origin_clean = stream_data.get("origin")
-        if not origin_clean and "http" in referer_clean:
-            parts = referer_clean.split('/')
-            origin_clean = f"{parts[0]}//{parts[2]}"
 
         if "http" not in url_clean:
             return "Token manuale non impostato o invalido", 400
-            
-        # Simula fedelmente un browser reale per ingannare le CDN più rigide
-        proxy_headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-            "Referer": referer_clean,
-            "Origin": origin_clean,
-            "Accept": "*/*",
-            "Accept-Language": "it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7",
-            "Sec-Fetch-Dest": "empty",
-            "Sec-Fetch-Mode": "cors",
-            "Sec-Fetch-Site": "cross-site",
-            "Connection": "keep-alive"
-        }
 
-        try:
-            req = requests.get(url_clean, headers=proxy_headers, timeout=10)
-            if req.status_code == 200:
-                # Restituisce il file .m3u8 al client IPTV
-                return Response(req.content, content_type='application/vnd.apple.mpegurl')
-            
-            print(f"[MANUAL ERROR] HTTP {req.status_code} per {name_clean}")
-            return f"Errore sorgente manuale: HTTP {req.status_code}", req.status_code
-        except Exception as e:
-            print(f"[MANUAL EXCEPTION] {e}")
-            return f"Errore connessione sorgente: {e}", 500
+        # Concatena il referer all'URL per istruire direttamente il lettore IPTV
+        if "?" in url_clean:
+            redirect_url = f"{url_clean}|Referer={referer_clean}"
+        else:
+            redirect_url = f"{url_clean}?|Referer={referer_clean}"
+
+        print(f"[MANUAL REDIRECT] Reindirizzamento a: {redirect_url}")
+        return redirect(redirect_url, code=302)
 
     # B. Partita Squadra Serie A (Scraping automatico)
     if name_clean in SERIE_A_TEAMS:
