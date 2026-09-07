@@ -72,7 +72,7 @@ MANUAL_STREAMS = {
         "origin": "https://hamis.romponalis.st"
     },
     "live_2": {
-        "url": "https://gr676m.l948728p57nx.net:8443/hls/g8yy3cfv128h5.m3u8?s=HPc9CMpPnr4_Whd8Il_FGA&e=1788810115",
+        "url": "https://gr676m.l948728p57nx.net:8443/hls/g8yy3cfv128h5.m3u8?s=WUXMiwJhozQaC7JOTKJkFQ&e=1788811358",
         "referer": "https://cuttingfame.net/",
         "origin": "https://cuttingfame.net"
     }
