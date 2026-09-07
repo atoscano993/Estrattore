@@ -208,14 +208,23 @@ def get_direct_event(event_slug):
     return f"Impossibile estrarre lo stream per '{clean_slug}'", 404
 
 @app.route('/<channel_name>')
+@app.route('/<channel_name>')
 def get_stream(channel_name):
     name_clean = channel_name.replace(".m3u8", "").lower()
 
+    # 1. Partita Serie A
     if name_clean in SERIE_A_TEAMS:
+        # Tenta lo scraping automatico dal palinsesto
         stream_url = find_damitv_match_by_team(name_clean)
+        
+        # FALLBACK MANUALI (Se lo scraper su /schedule/ fallisce)
+        if not stream_url and name_clean == "cagliari":
+            stream_url = resolve_damitv_stream("seriea/2026-09-07/cag-lec")
+            
         if stream_url:
             return redirect(f"/proxy?url={requests.utils.quote(stream_url)}", code=302)
 
+    # 2. Canali Automatici H24
     if name_clean in AUTOMATIC_CHANNELS:
         ch_info = AUTOMATIC_CHANNELS[name_clean]
         if ch_info.get("tvnow_id"):
@@ -227,6 +236,7 @@ def get_stream(channel_name):
             if damitv_url:
                 return redirect(f"/proxy?url={requests.utils.quote(damitv_url)}", code=302)
 
+    # 3. ID Numerico TVNow Diretto
     if name_clean.isdigit():
         direct_url = resolve_tvnow_stream(name_clean)
         if direct_url:
