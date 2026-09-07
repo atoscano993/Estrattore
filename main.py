@@ -146,29 +146,17 @@ def home():
 def get_stream(channel_name):
     name_clean = channel_name.replace(".m3u8", "").lower()
 
-    # A. Canali Manuali (Hot-Swap)
+# A. Canali Manuali (Hot-Swap via Direct Redirect)
     if name_clean in MANUAL_STREAMS:
         stream_data = MANUAL_STREAMS[name_clean]
-        
         url_clean = stream_data["url"].strip()
-        referer_clean = stream_data["referer"].strip()
-        origin_clean = stream_data.get("origin", referer_clean).strip()
 
         if "http" not in url_clean:
             return "Token manuale non impostato o invalido", 400
             
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            "Referer": referer_clean,
-            "Origin": origin_clean
-        }
-        try:
-            req = requests.get(url_clean, headers=headers, timeout=10)
-            if req.status_code == 200:
-                return Response(req.content, content_type='application/vnd.apple.mpegurl')
-            return f"Errore sorgente manuale: HTTP {req.status_code}", req.status_code
-        except Exception as e:
-            return f"Errore connessione sorgente: {e}", 500
+        print(f"[MANUAL REDIRECT] Redirezione per: {name_clean}")
+        # Reindirizza direttamente il player IPTV all'URL della CDN
+        return redirect(url_clean, code=302)
 
     # B. Partita Squadra Serie A (Scraping automatico)
     if name_clean in SERIE_A_TEAMS:
