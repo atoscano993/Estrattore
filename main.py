@@ -1,6 +1,7 @@
 import os
 import re
 import requests
+from datetime import datetime
 from urllib.parse import urljoin
 from flask import Flask, redirect, Response, request
 
@@ -151,46 +152,36 @@ def resolve_damitv_stream(damitv_id):
 def find_damitv_match_by_team(team_key):
     try:
         keywords = SERIE_A_TEAMS.get(team_key, [team_key])
+        today_str = datetime.now().strftime('%Y-%m-%d')
         
-        # 1. Chiama l'API JSON del palinsesto ufficiale invece dell'HTML
-        schedule_api_url = "https://damitv.st/papi/schedule"
-        res = requests.get(schedule_api_url, headers=HEADERS_DAMITV, timeout=6)
-        
+        # 1. SCRAPING PALINSESTO GENERALE
+        schedule_url = "https://damitv.st/schedule/"
+        res = requests.get(schedule_url, headers=HEADERS_DAMITV, timeout=6)
         if res.status_code == 200:
-            try:
-                events_data = res.json()
-                # Se l'API restituisce una lista o mappa di eventi
-                events = events_data.get("events", []) if isinstance(events_data, dict) else events_data
-                
-                for ev in events:
-                    # Estrae l'ID/slug dell'evento dal JSON (es. "ucl/2026-09-08/rma-int")
-                    event_id = str(ev.get("id") or ev.get("slug") or ev.get("url") or "")
-                    event_title = str(ev.get("title") or ev.get("name") or "").lower()
-                    
-                    # Controlla se una delle parole chiave della squadra è presente nel titolo o nell'ID
-                    for kw in keywords:
-                        if kw in event_title or kw in event_id.lower():
-                            stream_url = resolve_damitv_stream(event_id)
-                            if stream_url:
-                                return stream_url
-            except Exception:
-                # Fallback in caso l'API restituisca HTML anziché JSON
-                pass
-
-        # 2. Scraper Regex di sicurezza su tutto il testo grezzo della pagina
-        schedule_page_url = "https://damitv.st/schedule/"
-        res_html = requests.get(schedule_page_url, headers=HEADERS_DAMITV, timeout=6)
-        if res_html.status_code == 200:
-            raw_text = res_html.text.lower()
-            # Estrae qualsiasi percorso del tipo "ucl/...", "seriea/...", "coppaitalia/..."
-            found_paths = re.findall(r'(?:ucl|seriea|coppaitalia|embed)/[a-z0-9_\-\/]+', raw_text)
+            html_content = res.text.lower()
+            found_urls = re.findall(r'(?:href=["\']|id=)([^"\'\s>]*?(?:seriea|ucl|coppaitalia|embed|event)[^"\'\s>]*)', html_content, re.IGNORECASE)
             
-            for path in set(found_paths):
+            for url_str in found_urls:
                 for kw in keywords:
-                    if kw in path:
-                        stream_url = resolve_damitv_stream(path)
+                    pattern = r'(?:^|[-_/%?])' + re.escape(kw) + r'(?:$|[-_/%&])'
+                    if re.search(pattern, url_str):
+                        slug = url_str.split("id=")[-1] if "id=" in url_str else url_str
+                        slug = slug.strip("/").lstrip("?")
+                        stream_url = resolve_damitv_stream(slug)
                         if stream_url:
                             return stream_url
+
+        # 2. GENERAZIONE AUTOMATICA PERCORSI DINAMICI (FAILOVER PER DATA ODIERNA)
+        for kw in keywords:
+            candidates = [
+                f"ucl/{today_str}/{kw}",
+                f"seriea/{today_str}/{kw}",
+                f"coppaitalia/{today_str}/{kw}"
+            ]
+            for cand in candidates:
+                stream_url = resolve_damitv_stream(cand)
+                if stream_url:
+                    return stream_url
 
     except Exception as e:
         print(f"[SCRAPER ERROR] {team_key}: {e}")
@@ -215,6 +206,84 @@ def debug_dami():
 def proxy_m3u8():
     target_url = request.args.get('url')
     if not target_url:
+        return "URL mancante", 400
+    
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Referer": "https://damitv.st/",
+        "Origin": "https://damitv.st",
+        "Accept": "*/*"
+    }
+
+    try:
+        res = requests.get(target_url, headers=headers, timeout=12, stream=True)
+        if res.status_code == 200:
+            content_type = res.headers.get('Content-Type', '')
+            
+            if ".m3u8" in target_url or "mpegurl" in content_type or "apple" in content_type:
+                lines = res.text.splitlines()
+                new_lines = []
+                
+                for line in lines:
+                    line_str = line.strip()
+                    if line_str and not line_str.startswith('#'):
+                        full_url = urljoin(target_url, line_str)
+                        line_str = f"/proxy?url={requests.utils.quote(full_url)}"
+                    new_lines.append(line_str)
+                
+                rewritten_m3u8 = "\n".join(new_lines)
+                response = Response(rewritten_m3u8, mimetype='application/vnd.apple.mpegurl')
+                response.headers["Access-Control-Allow-Origin"] = "*"
+                response.headers["Access-Control-Allow-Headers"] = "*"
+                return response
+            
+            response = Response(res.iter_content(chunk_size=1024*64), content_type=content_type or 'video/mp2t')
+            response.headers["Access-Control-Allow-Origin"] = "*"
+            return response
+        else:
+            return f"Errore remoto: {res.status_code}", res.status_code
+    except Exception as e:
+        return f"Errore Proxy: {e}", 500
+        
+@app.route('/event/<path:event_slug>')
+def get_direct_event(event_slug):
+    clean_slug = event_slug.replace(".m3u8", "")
+    stream_url = resolve_damitv_stream(clean_slug)
+    if stream_url:
+        return redirect(f"/proxy?url={requests.utils.quote(stream_url)}", code=302)
+    return f"Impossibile estrarre lo stream per '{clean_slug}'", 404
+
+@app.route('/<channel_name>')
+def get_stream(channel_name):
+    name_clean = channel_name.replace(".m3u8", "").lower()
+
+    if name_clean in SERIE_A_TEAMS:
+        stream_url = find_damitv_match_by_team(name_clean)
+            
+        if stream_url:
+            return redirect(f"/proxy?url={requests.utils.quote(stream_url)}", code=302)
+
+    if name_clean in AUTOMATIC_CHANNELS:
+        ch_info = AUTOMATIC_CHANNELS[name_clean]
+        if ch_info.get("tvnow_id"):
+            tvnow_url = resolve_tvnow_stream(ch_info["tvnow_id"])
+            if tvnow_url:
+                return redirect(tvnow_url, code=302)
+        if ch_info.get("damitv_id"):
+            damitv_url = resolve_damitv_stream(ch_info["damitv_id"])
+            if damitv_url:
+                return redirect(f"/proxy?url={requests.utils.quote(damitv_url)}", code=302)
+
+    if name_clean.isdigit():
+        direct_url = resolve_tvnow_stream(name_clean)
+        if direct_url:
+            return redirect(direct_url, code=302)
+
+    return f"Nessun evento disponibile per '{channel_name}'", 503
+
+if __name__ == '__main__':
+    port = int(os.environ.get('PORT', 8080))
+    app.run(host='0.0.0.0', port=port)
         return "URL mancante", 400
     
     headers = {
