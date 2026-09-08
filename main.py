@@ -189,18 +189,28 @@ def proxy_m3u8():
     if not target_url:
         return "URL mancante", 400
     
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Referer": "https://damitv.st/",
-        "Origin": "https://damitv.st",
-        "Accept": "*/*"
-    }
+    # 1. Riconoscimento dinamico della sorgente per inviare gli header corretti
+    if "bluetier.top" in target_url:
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Referer": "https://wideiptv.top/",
+            "Origin": "https://wideiptv.top",
+            "Accept": "*/*"
+        }
+    else:
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Referer": "https://damitv.st/",
+            "Origin": "https://damitv.st",
+            "Accept": "*/*"
+        }
 
     try:
         res = requests.get(target_url, headers=headers, timeout=12, stream=True)
         if res.status_code == 200:
             content_type = res.headers.get('Content-Type', '')
             
+            # 2. Se è un file di testo M3U8 (Master o Sub-playlist), riscrivi tutti i link interni
             if ".m3u8" in target_url or "mpegurl" in content_type or "apple" in content_type:
                 lines = res.text.splitlines()
                 new_lines = []
@@ -208,6 +218,7 @@ def proxy_m3u8():
                 for line in lines:
                     line_str = line.strip()
                     if line_str and not line_str.startswith('#'):
+                        # Risolve percorsi relativi sia per sub-playlist che per segmenti .ts
                         full_url = urljoin(target_url, line_str)
                         line_str = f"/proxy?url={requests.utils.quote(full_url)}"
                     new_lines.append(line_str)
@@ -218,6 +229,7 @@ def proxy_m3u8():
                 response.headers["Access-Control-Allow-Headers"] = "*"
                 return response
             
+            # 3. Se è un segmento video (.ts / .m4s / audio), effettua il proxy dello stream binario
             response = Response(res.iter_content(chunk_size=1024*64), content_type=content_type or 'video/mp2t')
             response.headers["Access-Control-Allow-Origin"] = "*"
             return response
@@ -225,7 +237,7 @@ def proxy_m3u8():
             return f"Errore remoto: {res.status_code}", res.status_code
     except Exception as e:
         return f"Errore Proxy: {e}", 500
-
+        
 @app.route('/event/<path:event_slug>')
 def get_direct_event(event_slug):
     clean_slug = event_slug.replace(".m3u8", "")
