@@ -151,17 +151,18 @@ def resolve_damitv_stream(damitv_id):
 def find_damitv_match_by_team(team_key):
     try:
         keywords = SERIE_A_TEAMS.get(team_key, [team_key])
+        today_str = datetime.now().strftime('%Y-%m-%d')
+        
+        # 1. TENTATIVO VIA SCRAPING PALINSESTO
         schedule_url = "https://damitv.st/schedule/"
         res = requests.get(schedule_url, headers=HEADERS_DAMITV, timeout=6)
         if res.status_code == 200:
             html_content = res.text.lower()
-            # Cerca eventi di Serie A, Champions League (ucl), Coppa Italia o embed generici
-            found_urls = re.findall(r'(?:href=["\']|id=)([^"\'\s>]*?(?:seriea|ucl|coppaitalia|embed|event)[^"\'\s>]*)', html_content, re.IGNORECASE)
+            # Cerca qualsiasi attributo (href, id, data-id, src) contenente eventi
+            found_urls = re.findall(r'(?:href|id|data-id|src)=["\']([^"\'\s>]*?(?:seriea|ucl|coppaitalia|embed|event)[^"\'\s>]*)["\']', html_content, re.IGNORECASE)
             
             for url_str in found_urls:
                 for kw in keywords:
-                    # Verifica che la parola chiave sia delimitata (es. /int-, -int, /inter) 
-                    # per evitare falsi positivi con altre squadre
                     pattern = r'(?:^|[-_/%?])' + re.escape(kw) + r'(?:$|[-_/%&])'
                     if re.search(pattern, url_str):
                         slug = url_str.split("id=")[-1] if "id=" in url_str else url_str
@@ -169,6 +170,21 @@ def find_damitv_match_by_team(team_key):
                         stream_url = resolve_damitv_stream(slug)
                         if stream_url:
                             return stream_url
+
+        # 2. TENTATIVO DINAMICO AUTOMATICO (FAILOVER UCL / SERIE A)
+        # Genera gli slug più comuni usati da DamITV per la giornata di oggi
+        primary_kw = keywords[-1] # es. "int" o "juv"
+        fallback_slugs = [
+            f"ucl/{today_str}/{primary_kw}",
+            f"seriea/{today_str}/{primary_kw}",
+            f"coppaitalia/{today_str}/{primary_kw}"
+        ]
+        
+        for fallback_slug in fallback_slugs:
+            stream_url = resolve_damitv_stream(fallback_slug)
+            if stream_url:
+                return stream_url
+
     except Exception as e:
         print(f"[SCRAPER ERROR] {team_key}: {e}")
     return None
