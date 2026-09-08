@@ -148,32 +148,42 @@ def find_damitv_match_by_team(team_key):
     try:
         keywords = SERIE_A_TEAMS.get(team_key, [team_key])
         
-        # 1. SCRAPING AVANZATO DEL PALINSESTO
+        # 1. RICERCA TRAMITE API DI SEARCH INTERNA
+        for kw in keywords:
+            search_api = f"https://damitv.st/papi/search?q={kw}"
+            try:
+                res = requests.get(search_api, headers=HEADERS_DAMITV, timeout=4)
+                if res.status_code == 200:
+                    data = res.json()
+                    events = data.get("events", []) if isinstance(data, dict) else (data if isinstance(data, list) else [])
+                    for ev in events:
+                        slug = ev.get("id") or ev.get("slug") or ev.get("url", "")
+                        if slug:
+                            stream_url = resolve_damitv_stream(slug)
+                            if stream_url:
+                                return stream_url
+            except Exception:
+                pass
+
+        # 2. SCRAPING DI FALLBACK CON REGEX SU MODELLI SLUG COMUNI
         schedule_url = "https://damitv.st/schedule/"
         res = requests.get(schedule_url, headers=HEADERS_DAMITV, timeout=6)
         if res.status_code == 200:
             html_content = res.text.lower()
-            
-            # Estrae tutti i link o attributi id/href presenti nella pagina
-            found_urls = re.findall(r'(?:href=["\']|id=)([^"\'\s>]+)', html_content, re.IGNORECASE)
+            found_urls = re.findall(r'["\']([^"\'\s>]*?(?:seriea|ucl|coppaitalia|event)[^"\'\s>]*)["\']', html_content, re.IGNORECASE)
             
             for url_str in found_urls:
                 for kw in keywords:
-                    # Se la parola chiave (es. 'int' o 'inter') è presente nel link
                     if kw in url_str:
                         slug = url_str.split("id=")[-1] if "id=" in url_str else url_str
                         slug = slug.strip("/").lstrip("?")
-                        
-                        # Filtra solo gli slug pertinenti agli eventi
-                        if any(x in slug for x in ['ucl', 'seriea', 'coppaitalia', 'event', 'embed', '-']):
-                            stream_url = resolve_damitv_stream(slug)
-                            if stream_url:
-                                return stream_url
+                        stream_url = resolve_damitv_stream(slug)
+                        if stream_url:
+                            return stream_url
 
     except Exception as e:
         print(f"[SCRAPER ERROR] {team_key}: {e}")
     return None
-
 
 # ==========================================
 # ROTTE FLASK
