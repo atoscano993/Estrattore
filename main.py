@@ -151,39 +151,46 @@ def resolve_damitv_stream(damitv_id):
 def find_damitv_match_by_team(team_key):
     try:
         keywords = SERIE_A_TEAMS.get(team_key, [team_key])
-        today_str = datetime.now().strftime('%Y-%m-%d')
         
-        # 1. TENTATIVO VIA SCRAPING PALINSESTO
-        schedule_url = "https://damitv.st/schedule/"
-        res = requests.get(schedule_url, headers=HEADERS_DAMITV, timeout=6)
+        # 1. Chiama l'API JSON del palinsesto ufficiale invece dell'HTML
+        schedule_api_url = "https://damitv.st/papi/schedule"
+        res = requests.get(schedule_api_url, headers=HEADERS_DAMITV, timeout=6)
+        
         if res.status_code == 200:
-            html_content = res.text.lower()
-            # Cerca qualsiasi attributo (href, id, data-id, src) contenente eventi
-            found_urls = re.findall(r'(?:href|id|data-id|src)=["\']([^"\'\s>]*?(?:seriea|ucl|coppaitalia|embed|event)[^"\'\s>]*)["\']', html_content, re.IGNORECASE)
+            try:
+                events_data = res.json()
+                # Se l'API restituisce una lista o mappa di eventi
+                events = events_data.get("events", []) if isinstance(events_data, dict) else events_data
+                
+                for ev in events:
+                    # Estrae l'ID/slug dell'evento dal JSON (es. "ucl/2026-09-08/rma-int")
+                    event_id = str(ev.get("id") or ev.get("slug") or ev.get("url") or "")
+                    event_title = str(ev.get("title") or ev.get("name") or "").lower()
+                    
+                    # Controlla se una delle parole chiave della squadra è presente nel titolo o nell'ID
+                    for kw in keywords:
+                        if kw in event_title or kw in event_id.lower():
+                            stream_url = resolve_damitv_stream(event_id)
+                            if stream_url:
+                                return stream_url
+            except Exception:
+                # Fallback in caso l'API restituisca HTML anziché JSON
+                pass
+
+        # 2. Scraper Regex di sicurezza su tutto il testo grezzo della pagina
+        schedule_page_url = "https://damitv.st/schedule/"
+        res_html = requests.get(schedule_page_url, headers=HEADERS_DAMITV, timeout=6)
+        if res_html.status_code == 200:
+            raw_text = res_html.text.lower()
+            # Estrae qualsiasi percorso del tipo "ucl/...", "seriea/...", "coppaitalia/..."
+            found_paths = re.findall(r'(?:ucl|seriea|coppaitalia|embed)/[a-z0-9_\-\/]+', raw_text)
             
-            for url_str in found_urls:
+            for path in set(found_paths):
                 for kw in keywords:
-                    pattern = r'(?:^|[-_/%?])' + re.escape(kw) + r'(?:$|[-_/%&])'
-                    if re.search(pattern, url_str):
-                        slug = url_str.split("id=")[-1] if "id=" in url_str else url_str
-                        slug = slug.strip("/").lstrip("?")
-                        stream_url = resolve_damitv_stream(slug)
+                    if kw in path:
+                        stream_url = resolve_damitv_stream(path)
                         if stream_url:
                             return stream_url
-
-        # 2. TENTATIVO DINAMICO AUTOMATICO (FAILOVER UCL / SERIE A)
-        # Genera gli slug più comuni usati da DamITV per la giornata di oggi
-        primary_kw = keywords[-1] # es. "int" o "juv"
-        fallback_slugs = [
-            f"ucl/{today_str}/{primary_kw}",
-            f"seriea/{today_str}/{primary_kw}",
-            f"coppaitalia/{today_str}/{primary_kw}"
-        ]
-        
-        for fallback_slug in fallback_slugs:
-            stream_url = resolve_damitv_stream(fallback_slug)
-            if stream_url:
-                return stream_url
 
     except Exception as e:
         print(f"[SCRAPER ERROR] {team_key}: {e}")
