@@ -23,15 +23,15 @@ HEADERS_DAMITV = {
 }
 
 AUTOMATIC_CHANNELS = {
-    "sport24": {"tvnow_id": "869", "damitv_id": "sky-sport-24"},
-    "sportuno": {"tvnow_id": "461", "damitv_id": "sky-sport-uno"},
-    "sportcalcio": {"tvnow_id": "870", "damitv_id": "sky-sport-calcio"},
-    "sportf1": {"tvnow_id": "577", "damitv_id": "sky-sport-f1"},
-    "sportmoto": {"tvnow_id": "575", "damitv_id": "sky-sport-motogp"},
-    "sportmax": {"tvnow_id": "460", "damitv_id": "sky-sport-max"},
-    "sporttennis": {"tvnow_id": "576", "damitv_id": "sky-sport-tennis"},
-    "sportarena": {"tvnow_id": "462", "damitv_id": "sky-sport-arena"},
-    "dazn1": {"tvnow_id": "877", "damitv_id": "dazn-1"}
+    "sport24": {"tvnow_id": "869", "damitv_id": "869"},
+    "sportuno": {"tvnow_id": "461", "damitv_id": "461"},
+    "sportcalcio": {"tvnow_id": "870", "damitv_id": "870"},
+    "sportf1": {"tvnow_id": "577", "damitv_id": "577"},
+    "sportmoto": {"tvnow_id": "575", "damitv_id": "575"},
+    "sportmax": {"tvnow_id": "460", "damitv_id": "460"},
+    "sporttennis": {"tvnow_id": "576", "damitv_id": "576"},
+    "sportarena": {"tvnow_id": "462", "damitv_id": "462"},
+    "dazn1": {"tvnow_id": "877", "damitv_id": "877"}
 }
 
 SERIE_A_TEAMS = {
@@ -83,7 +83,7 @@ def resolve_tvnow_stream(stream_id):
     return None
 
 def resolve_damitv_stream(damitv_id):
-    """Estrae gli m3u8 disponibili e seleziona automaticamente il primo funzionante"""
+    """Estrae gli m3u8 per eventi e canali H24 (supporta sia slug che ID numerici)"""
     try:
         clean_id = damitv_id.lstrip('/')
         match_id = clean_id.split('/')[-1] if '/' in clean_id else clean_id
@@ -91,7 +91,9 @@ def resolve_damitv_stream(damitv_id):
         session = requests.Session()
         session.headers.update(HEADERS_DAMITV)
 
+        # 1. Recupera la sessione e il token temporaneo (tk & e)
         token = ""
+        expire = ""
         try:
             r_sess = session.get("https://damitv.st/papi/ad-session", timeout=5)
             if r_sess.status_code == 200:
@@ -99,10 +101,19 @@ def resolve_damitv_stream(damitv_id):
                 if sid:
                     r_ver = session.get(f"https://damitv.st/papi/ad-verify?s={sid}", timeout=5)
                     if r_ver.status_code == 200:
-                        token = r_ver.json().get("t", "")
+                        data_ver = r_ver.json()
+                        token = data_ver.get("t", "")
+                        expire = data_ver.get("e", "")
         except Exception as e:
             print(f"[DAMITV TOKEN WARN] {e}")
 
+        # 2. Se l'ID è numerico (es. 869 per Sky Sport 24), genera direttamente l'URL live
+        if clean_id.isdigit() and token:
+            direct_live_url = f"https://messi.damitv.st/papi/tv/live/{clean_id}.m3u8?tk={token}&e={expire}"
+            if verify_stream_health(direct_live_url):
+                return direct_live_url
+
+        # 3. Altrimenti procedi con l'API extract-url per eventi o slug
         extract_url = f"https://damitv.st/papi/extract-url/{clean_id}"
         r_ext = session.get(extract_url, timeout=5)
         
@@ -114,8 +125,6 @@ def resolve_damitv_stream(damitv_id):
             data = r_ext.json()
             if data.get("success"):
                 candidates = []
-                
-                # Raccoglie tutti i server possibili restituiti dall'API
                 if isinstance(data.get("streams"), list):
                     candidates.extend(data.get("streams"))
                 if isinstance(data.get("hlsUrls"), list):
@@ -125,16 +134,12 @@ def resolve_damitv_stream(damitv_id):
                 if data.get("backupHlsUrl"):
                     candidates.append(data.get("backupHlsUrl"))
 
-                # Elimina duplicati mantenendo l'ordine
                 unique_candidates = list(dict.fromkeys(candidates))
 
-                # Test sequenziale automatico (Failover)
                 for stream_url in unique_candidates:
                     if verify_stream_health(stream_url):
-                        print(f"[FAILOVER SUCCESS] Selezionato server valido: {stream_url}")
                         return stream_url
                 
-                # Se il check fallisce, restituisce comunque il primario per sicurezza
                 if unique_candidates:
                     return unique_candidates[0]
 
