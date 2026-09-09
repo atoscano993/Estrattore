@@ -111,9 +111,9 @@ def verify_stream_health(url, session):
     try:
         parsed = urlparse(url)
         headers = HEADERS_BASE.copy()
-        if any(domain in parsed.netloc for domain in ["indianservers", "embedindia", "workers.dev"]):
-            headers["Referer"] = "https://embedindia.st/"
-            headers["Origin"] = "https://embedindia.st"
+        if any(domain in parsed.netloc for domain in ["futtv", "indianservers", "embedindia", "workers.dev"]):
+             headers["Referer"] = "https://embedindia.st/"
+             headers["Origin"] = "https://embedindia.st"
         else:
             headers["Referer"] = "https://damitv.st/"
             headers["Origin"] = "https://damitv.st"
@@ -132,29 +132,32 @@ def verify_stream_health(url, session):
 def generate_full_test_urls(slug, token="", expire=""):
     today_str = datetime.now().strftime('%Y-%m-%d')
     
-    # Mettiamo prima i domini che rispondono dai data center
+    # Domini base inclusi i nuovi nodi futtv e messi
     base_domains = [
+        "india.futtv.nx.kg",
+        "futtv.nx.kg",
         "messi.damitv.st",
         "damitv.st",
         "embedindia.st"
     ]
     
     paths = [
+        f"{slug}/tracks-v1a1/mono.m3u8",        # Pattern esatto scoperto nello screenshot
+        f"{slug}/tracks-v1a1/mono.ts.m3u8",
+        f"ucl/{today_str}/{slug}/mono.m3u8",
+        f"ucl/{today_str}/{slug}/tracks-v1a1/mono.m3u8",
         f"ucl/{today_str}/{slug}/mono.ts.m3u8",
         f"ucl/{today_str}/{slug}/index.m3u8",
         f"{today_str}/{slug}/index.m3u8",
-        f"{slug}/index.m3u8",
-        f"papi/tv/live/{slug}.m3u8"
+        f"{slug}/index.m3u8"
     ]
     
     if token:
-        paths.insert(0, f"secure/{token}/{expire}/1788969600/{slug}/tracks-v1a1/mono.ts.m3u8")
+        paths.append(f"secure/{token}/{expire}/1788969600/{slug}/tracks-v1a1/mono.ts.m3u8")
     
-    clean_paths = [p for p in paths if p]
     urls = []
-    
     for domain in base_domains:
-        for path in clean_paths:
+        for path in paths:
             urls.append(f"https://{domain}/{path}")
             
     return urls
@@ -215,7 +218,7 @@ def proxy_m3u8():
     parsed = urlparse(target_url)
     headers = HEADERS_BASE.copy()
     
-    if any(domain in parsed.netloc for domain in ["indianservers", "embedindia", "workers.dev"]):
+    if any(domain in parsed.netloc for domain in ["futtv", "indianservers", "embedindia", "workers.dev"]):
         headers["Referer"] = "https://embedindia.st/"
         headers["Origin"] = "https://embedindia.st"
     else:
