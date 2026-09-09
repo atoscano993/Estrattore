@@ -106,6 +106,41 @@ def verify_stream_health(url, session=None):
         return False
     except Exception:
         return False
+
+def extract_all_urls_from_json(data):
+    """ Ricorsivamente estrae ogni stringa che assomiglia a un URL HTTP/HTTPS dal JSON """
+    urls = []
+    if isinstance(data, dict):
+        for k, v in data.items():
+            urls.extend(extract_all_urls_from_json(v))
+    elif isinstance(data, list):
+        for item in data:
+            urls.extend(extract_all_urls_from_json(item))
+    elif isinstance(data, str):
+        if data.startswith("http://") or data.startswith("https://"):
+            urls.append(data)
+    return urls
+
+def generate_server_variants(base_url):
+    """ Genera varianti di dominio per testare i Server 1..6 di DamITV (es. messi, messi2, server4, ecc.) """
+    variants = [base_url]
+    parsed = urlparse(base_url)
+    netloc = parsed.netloc
+
+    # Prefissi o nomi di server comuni usati nei mirror HLS
+    server_prefixes = ["messi1", "messi2", "messi3", "messi4", "messi5", "messi6", "s1", "s2", "s3", "s4", "cdn1", "cdn2"]
+    
+    for pref in server_prefixes:
+        # Sostituisce ad esempio 'messi.damitv.st' con 'messi4.damitv.st'
+        if "." in netloc:
+            domain_parts = netloc.split(".")
+            new_netloc = f"{pref}.{'.'.join(domain_parts[1:])}"
+            new_url = urlunparse(parsed._replace(netloc=new_netloc))
+            if new_url not in variants:
+                variants.append(new_url)
+                
+    return variants
+
 def resolve_tvnow_stream(stream_id):
     try:
         api_url = f"https://chat.cfbu247.sbs/api/resolve-dlstream/{stream_id}"
@@ -155,26 +190,24 @@ def resolve_damitv_stream(damitv_id):
         if r_ext.status_code == 200:
             data = r_ext.json()
             if data.get("success"):
-                candidates = []
-                if isinstance(data.get("streams"), list):
-                    candidates.extend(data.get("streams"))
-                if isinstance(data.get("hlsUrls"), list):
-                    candidates.extend(data.get("hlsUrls"))
-                if data.get("hlsUrl"):
-                    candidates.append(data.get("hlsUrl"))
-                if data.get("backupHlsUrl"):
-                    candidates.append(data.get("backupHlsUrl"))
-
+                # 1. Estrarre TUTTI gli URL presenti nella risposta JSON
+                candidates = extract_all_urls_from_json(data)
                 unique_candidates = list(dict.fromkeys(candidates))
 
-                # TESTA SEQUENZIALMENTE TUTTI I SERVER DAL PRIMO ALL'ULTIMO
-                for stream_url in unique_candidates:
-                    if verify_stream_health(stream_url, session):
-                        return stream_url
+                # 2. Generare varianti per ogni URL trovato (es. messi1, messi2, messi4...)
+                all_to_test = []
+                for cand in unique_candidates:
+                    all_to_test.extend(generate_server_variants(cand))
                 
-                # Se la verifica fallisce a causa del firewall, prova l'ultimo server lista (server 4/backup)
-                if unique_candidates:
-                    return unique_candidates[-1]
+                all_to_test = list(dict.fromkeys(all_to_test))
+
+                # 3. Testare sequenzialmente ogni server/variante finché non risponde #EXTM3U
+                for stream_url in all_to_test:
+                    if verify_stream_health(stream_url, session):
+                        print(f"[SUCCESS STREAM FOUND]: {stream_url}")
+                        return stream_url
+                    else:
+                        print(f"[DEAD/404 STREAM]: {stream_url}")
 
     except Exception as e:
         print(f"[DAMITV RESOLVE ERROR] {e}")
@@ -213,7 +246,6 @@ def proxy_m3u8():
     if not target_url:
         return "URL mancante", 400
     
-    # Headers completi per bypassare il controllo 404 sui segmenti TS / M3U8
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         "Referer": "https://damitv.st/",
