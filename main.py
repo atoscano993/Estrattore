@@ -18,8 +18,12 @@ HEADERS_TVNOW = {
 }
 
 HEADERS_BASE = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
     "Accept": "*/*",
+    "Accept-Language": "it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7",
+    "Sec-Ch-Ua": '"Chromium";v="128", "Not=A?Brand";v="24", "Google Chrome";v="128"',
+    "Sec-Ch-Ua-Mobile": "?0",
+    "Sec-Ch-Ua-Platform": '"Windows"',
     "Sec-Fetch-Dest": "empty",
     "Sec-Fetch-Mode": "cors",
     "Sec-Fetch-Site": "cross-site"
@@ -114,14 +118,16 @@ def verify_stream_health(url, session):
             headers["Referer"] = "https://damitv.st/"
             headers["Origin"] = "https://damitv.st"
 
-        r = session.get(url, headers=headers, timeout=3, stream=True, allow_redirects=True)
+        r = session.get(url, headers=headers, timeout=6, stream=True, allow_redirects=True)
+        print(f"[CHECK] {url} -> Status: {r.status_code}")
+        
         if r.status_code == 200:
             chunk = next(r.iter_content(chunk_size=512), b"").decode('utf-8', errors='ignore')
             if "#EXTM3U" in chunk or "#EXT-X-" in chunk or ".ts" in chunk or len(chunk) > 10:
                 return True
-        return False
-    except Exception:
-        return False
+    except Exception as e:
+        print(f"[CHECK ERROR] {url} -> {e}")
+    return False
 
 def generate_full_test_urls(slug, token="", expire=""):
     today_str = datetime.now().strftime('%Y-%m-%d')
@@ -160,17 +166,17 @@ def resolve_damitv_stream(team_key):
 
     token, expire = "", ""
     try:
-        r_sess = session.get("https://damitv.st/papi/ad-session", timeout=3)
+        r_sess = session.get("https://damitv.st/papi/ad-session", timeout=4)
         if r_sess.status_code == 200:
             sid = r_sess.json().get("s", "")
             if sid:
-                r_ver = session.get(f"https://damitv.st/papi/ad-verify?s={sid}", timeout=3)
+                r_ver = session.get(f"https://damitv.st/papi/ad-verify?s={sid}", timeout=4)
                 if r_ver.status_code == 200:
                     data_v = r_ver.json()
                     token = data_v.get("t", "")
                     expire = data_v.get("e", "")
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[TOKEN ERROR] {e}")
 
     slugs = SERIE_A_TEAMS.get(team_key, [team_key])
     
@@ -178,7 +184,7 @@ def resolve_damitv_stream(team_key):
         test_urls = generate_full_test_urls(slug, token, expire)
         for url in test_urls:
             if verify_stream_health(url, session):
-                print(f"[SUCCESS STREAM]: {url}")
+                print(f"[FOUND SUCCESS STREAM]: {url}")
                 return url
 
     return None
@@ -186,7 +192,7 @@ def resolve_damitv_stream(team_key):
 def resolve_tvnow_stream(stream_id):
     try:
         api_url = f"https://chat.cfbu247.sbs/api/resolve-dlstream/{stream_id}"
-        response = requests.get(api_url, headers=HEADERS_TVNOW, timeout=4)
+        response = requests.get(api_url, headers=HEADERS_TVNOW, timeout=5)
         if response.status_code == 200:
             data = response.json()
             return data.get("m3u8") or data.get("proxyPlaylistUrl")
@@ -215,7 +221,7 @@ def proxy_m3u8():
         headers["Origin"] = "https://damitv.st"
 
     try:
-        res = requests.get(target_url, headers=headers, timeout=10, stream=True, allow_redirects=True)
+        res = requests.get(target_url, headers=headers, timeout=12, stream=True, allow_redirects=True)
         final_url = res.url
 
         if res.status_code == 200:
