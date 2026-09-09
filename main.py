@@ -131,22 +131,24 @@ def verify_stream_health(url, session):
 
 def generate_full_test_urls(slug, token="", expire=""):
     today_str = datetime.now().strftime('%Y-%m-%d')
+    
+    # Mettiamo prima i domini che rispondono dai data center
     base_domains = [
-        "shiva.indianservers.st",
-        "netanyahu.indianservers.st",
         "messi.damitv.st",
-        "brahma.indianservers.st",
-        "vishnu.indianservers.st"
+        "damitv.st",
+        "embedindia.st"
     ]
     
     paths = [
-        f"secure/{token}/{expire}/1788969600/{slug}/tracks-v1a1/mono.ts.m3u8" if token else None,
         f"ucl/{today_str}/{slug}/mono.ts.m3u8",
         f"ucl/{today_str}/{slug}/index.m3u8",
         f"{today_str}/{slug}/index.m3u8",
         f"{slug}/index.m3u8",
         f"papi/tv/live/{slug}.m3u8"
     ]
+    
+    if token:
+        paths.insert(0, f"secure/{token}/{expire}/1788969600/{slug}/tracks-v1a1/mono.ts.m3u8")
     
     clean_paths = [p for p in paths if p]
     urls = []
