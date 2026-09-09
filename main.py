@@ -232,11 +232,25 @@ def resolve_damitv_stream(damitv_id):
     return None
 
 def find_damitv_match_by_team(team_key):
-    keywords = SERIE_A_TEAMS.get(team_key, [team_key])
-    for kw in keywords:
-        stream_url = resolve_damitv_stream(kw)
-        if stream_url:
-            return stream_url
+    try:
+        keywords = SERIE_A_TEAMS.get(team_key, [team_key])
+        today_str = datetime.now().strftime('%Y-%m-%d')
+
+        for kw in keywords:
+            # Genera gli slug esatti visti nei log Network
+            candidates = [
+                f"{today_str}/{kw}",         # es. 2026-09-09/nap-ars (il pattern esatto dello screenshot)
+                f"ucl/{today_str}/{kw}",     # es. ucl/2026-09-09/nap-ars
+                kw,                          # es. nap-ars
+                f"event/{kw}"
+            ]
+            for cand in candidates:
+                stream_url = resolve_damitv_stream(cand)
+                if stream_url:
+                    return stream_url
+
+    except Exception as e:
+        print(f"[SCRAPER ERROR] {team_key}: {e}")
     return None
 
 # ==========================================
