@@ -19,9 +19,12 @@ HEADERS_TVNOW = {
 
 HEADERS_DAMITV = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Referer": "https://damitv.st/",
-    "Origin": "https://damitv.st",
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8"
+    "Referer": "https://embedindia.st/",
+    "Origin": "https://embedindia.st",
+    "Accept": "*/*",
+    "Sec-Fetch-Dest": "empty",
+    "Sec-Fetch-Mode": "cors",
+    "Sec-Fetch-Site": "cross-site"
 }
 
 AUTOMATIC_CHANNELS = {
@@ -253,10 +256,19 @@ def proxy_m3u8():
     if not target_url:
         return "URL mancante", 400
     
+    # Determina dinamicamente i Referer in base all'host target
+    parsed_target = urlparse(target_url)
+    referer = "https://embedindia.st/"
+    origin = "https://embedindia.st"
+    
+    if "damitv" in parsed_target.netloc:
+        referer = "https://damitv.st/"
+        origin = "https://damitv.st"
+
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Referer": "https://damitv.st/",
-        "Origin": "https://damitv.st",
+        "Referer": referer,
+        "Origin": origin,
         "Accept": "*/*",
         "Sec-Fetch-Dest": "empty",
         "Sec-Fetch-Mode": "cors",
@@ -270,7 +282,8 @@ def proxy_m3u8():
         if res.status_code == 200:
             content_type = res.headers.get('Content-Type', '')
             
-            if ".m3u8" in final_url or "mpegurl" in content_type or "apple" in content_type:
+            # Riconosce sia file .m3u8 che risposte M3U8 mascherate da text/plain (come nello screenshot)
+            if ".m3u8" in final_url or "mpegurl" in content_type or "apple" in content_type or target_url.endswith(".m3u8"):
                 lines = res.text.splitlines()
                 new_lines = []
                 
