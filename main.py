@@ -7,6 +7,10 @@ from flask import Flask, redirect, Response, request
 
 app = Flask(__name__)
 
+# ==========================================
+# CONFIGURAZIONE HEADERS STANDARD
+# ==========================================
+
 HEADERS_TVNOW = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     "Referer": "https://tvnow247.top/",
@@ -95,10 +99,14 @@ SERIE_A_TEAMS = {
     "venezia": ["venezia", "ven"]
 }
 
+# ==========================================
+# UTILITY E ESTRAZIONE STATO STREAM
+# ==========================================
 def verify_stream_health(url, session=None):
     try:
         s = session or requests
-        r = s.get(url, headers=HEADERS_DAMITV, timeout=4, stream=True)
+        # allow_redirects=True gestisce direttamente i reindirizzamenti 302 visti nei log
+        r = s.get(url, headers=HEADERS_DAMITV, timeout=4, stream=True, allow_redirects=True)
         if r.status_code == 200:
             chunk = next(r.iter_content(chunk_size=512), b"").decode('utf-8', errors='ignore')
             if "#EXTM3U" in chunk or "#EXT-X-" in chunk or ".ts" in chunk:
@@ -108,7 +116,6 @@ def verify_stream_health(url, session=None):
         return False
 
 def extract_all_urls_from_json(data):
-    """ Ricorsivamente estrae ogni stringa che assomiglia a un URL HTTP/HTTPS dal JSON """
     urls = []
     if isinstance(data, dict):
         for k, v in data.items():
@@ -122,16 +129,13 @@ def extract_all_urls_from_json(data):
     return urls
 
 def generate_server_variants(base_url):
-    """ Genera varianti di dominio per testare i Server 1..6 di DamITV (es. messi, messi2, server4, ecc.) """
     variants = [base_url]
     parsed = urlparse(base_url)
     netloc = parsed.netloc
 
-    # Prefissi o nomi di server comuni usati nei mirror HLS
     server_prefixes = ["messi1", "messi2", "messi3", "messi4", "messi5", "messi6", "s1", "s2", "s3", "s4", "cdn1", "cdn2"]
     
     for pref in server_prefixes:
-        # Sostituisce ad esempio 'messi.damitv.st' con 'messi4.damitv.st'
         if "." in netloc:
             domain_parts = netloc.split(".")
             new_netloc = f"{pref}.{'.'.join(domain_parts[1:])}"
@@ -141,6 +145,9 @@ def generate_server_variants(base_url):
                 
     return variants
 
+# ==========================================
+# FUNZIONI DI RESOLUTION CON FAILOVER
+# ==========================================
 def resolve_tvnow_stream(stream_id):
     try:
         api_url = f"https://chat.cfbu247.sbs/api/resolve-dlstream/{stream_id}"
@@ -190,18 +197,15 @@ def resolve_damitv_stream(damitv_id):
         if r_ext.status_code == 200:
             data = r_ext.json()
             if data.get("success"):
-                # 1. Estrarre TUTTI gli URL presenti nella risposta JSON
                 candidates = extract_all_urls_from_json(data)
                 unique_candidates = list(dict.fromkeys(candidates))
 
-                # 2. Generare varianti per ogni URL trovato (es. messi1, messi2, messi4...)
                 all_to_test = []
                 for cand in unique_candidates:
                     all_to_test.extend(generate_server_variants(cand))
                 
                 all_to_test = list(dict.fromkeys(all_to_test))
 
-                # 3. Testare sequenzialmente ogni server/variante finché non risponde #EXTM3U
                 for stream_url in all_to_test:
                     if verify_stream_health(stream_url, session):
                         print(f"[SUCCESS STREAM FOUND]: {stream_url}")
@@ -236,6 +240,9 @@ def find_damitv_match_by_team(team_key):
         print(f"[SCRAPER ERROR] {team_key}: {e}")
     return None
 
+# ==========================================
+# ROTTE FLASK
+# ==========================================
 @app.route('/')
 def home():
     return "Estrattore attivo con Failover Automatico (TVNow + DamITV)", 200
@@ -257,18 +264,20 @@ def proxy_m3u8():
     }
 
     try:
-        res = requests.get(target_url, headers=headers, timeout=12, stream=True)
+        res = requests.get(target_url, headers=headers, timeout=12, stream=True, allow_redirects=True)
+        final_url = res.url
+
         if res.status_code == 200:
             content_type = res.headers.get('Content-Type', '')
             
-            if ".m3u8" in target_url or "mpegurl" in content_type or "apple" in content_type:
+            if ".m3u8" in final_url or "mpegurl" in content_type or "apple" in content_type:
                 lines = res.text.splitlines()
                 new_lines = []
                 
                 for line in lines:
                     line_str = line.strip()
                     if line_str and not line_str.startswith('#'):
-                        full_url = urljoin(target_url, line_str)
+                        full_url = urljoin(final_url, line_str)
                         line_str = f"/proxy?url={requests.utils.quote(full_url)}"
                     new_lines.append(line_str)
                 
