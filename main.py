@@ -39,19 +39,59 @@ SERIE_A_TEAMS = {
     "atalanta": ["atalanta", "ata"],
     "bologna": ["bologna", "bol"],
     "cagliari": ["cagliari", "cag"],
-    "como": ["como"],
+"como": [
+        "como", "com",
+        "com-rbl", "rbl-com", "com-lei", "lei-com", # Leipzig
+        "fey-com", "com-fey", # Feyenoord
+        "com-mun", "mun-com", # Manchester United
+        "len-com", "com-len", # Lens
+        "com-aek", "aek-com", # AEK Athens
+        "bet-com", "com-bet", # Real Betis
+        "com-psg", "psg-com", # Paris Saint-Germain
+        "bar-com", "com-bar"  # Barcelona
+    ],
     "fiorentina": ["fiorentina", "fio"],
     "frosinone": ["frosinone", "fro"],
     "genoa": ["genoa", "gen"],
-    "inter": ["inter", "int", "rma-int", "int-rma"],
+    "inter": [
+        "inter", "int", 
+        "rma-int", "int-rma", # Real Madrid
+        "int-bru", "bru-int", # Club Brugge
+        "int-shk", "shk-int", # Shakhtar Donetsk
+        "fey-int", "int-fey", # Feyenoord
+        "int-stu", "stu-int", # Stuttgart
+        "bvb-int", "int-bvb", "dor-int", "int-dor", # Borussia Dortmund
+        "int-liv", "liv-int", # Liverpool
+        "slo-int", "int-slo"  # Slovan Bratislava
+    ],
     "juventus": ["juventus", "juve", "juv"],
     "lazio": ["lazio", "laz"],
     "lecce": ["lecce", "lec"],
     "milan": ["milan", "mil"],
     "monza": ["monza", "mon"],
-    "napoli": ["napoli", "nap"],
+    "napoli": [
+        "napoli", "nap",
+        "nap-ars", "ars-nap", # Arsenal
+        "vil-nap", "nap-vil", # Villarreal
+        "nap-bod", "bod-nap", # Bodø/Glimt
+        "por-nap", "nap-por", # Porto
+        "mci-nap", "nap-mci", # Manchester City
+        "nap-bru", "bru-nap", # Club Brugge
+        "sab-nap", "nap-sab", # Sabah
+        "nap-vik", "vik-nap"  # Viking
+    ],
     "parma": ["parma", "par"],
-    "roma": ["roma", "rom"],
+"roma": [
+        "roma", "rom",
+        "fen-rom", "rom-fen", # Fenerbahçe
+        "rom-rma", "rma-rom", # Real Madrid
+        "rom-slo", "slo-rom", # Slovan Bratislava
+        "mun-rom", "rom-mun", # Manchester United
+        "psg-rom", "rom-psg", # Paris Saint-Germain
+        "rom-spo", "spo-rom", "rom-scp", "scp-rom", # Sporting CP
+        "aek-rom", "rom-aek", # AEK Athens
+        "rom-lil", "lil-rom"  # Lille
+    ],
     "sassuolo": ["sassuolo", "sas"],
     "torino": ["torino", "tor"],
     "udinese": ["udinese", "udi"],
