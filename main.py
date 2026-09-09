@@ -394,6 +394,7 @@ def resolve_damitv_stream(damitv_id):
         except Exception as e:
             print(f"[DAMITV TOKEN WARN] {e}")
 
+        # Se è un canale ID numerico diretto
         if clean_id.isdigit() and token:
             direct_live_url = f"https://messi.damitv.st/papi/tv/live/{clean_id}.m3u8?tk={token}&e={expire}"
             if verify_stream_health(direct_live_url):
@@ -421,18 +422,19 @@ def resolve_damitv_stream(damitv_id):
 
                 unique_candidates = list(dict.fromkeys(candidates))
 
+                # SCANSIONE A CASCATA REALE:
+                # Testa tutti i link uno ad uno finché non ne trova uno con risposta HTTP 200 (evita i 404)
                 for stream_url in unique_candidates:
                     if verify_stream_health(stream_url):
+                        print(f"[STREAM OK FOUND]: {stream_url}")
                         return stream_url
-                
-                if unique_candidates:
-                    return unique_candidates[0]
+                    else:
+                        print(f"[STREAM DEAD 404]: {stream_url}")
 
     except Exception as e:
         print(f"[DAMITV RESOLVE ERROR] {e}")
     
     return None
-
 def find_damitv_match_by_team(team_key):
     try:
         keywords = SERIE_A_TEAMS.get(team_key, [team_key])
