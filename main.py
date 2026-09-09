@@ -136,6 +136,7 @@ def generate_server_variants(base_url):
     parsed = urlparse(base_url)
     netloc = parsed.netloc
 
+    # Prefissi per i server classici DamiTV
     server_prefixes = ["messi1", "messi2", "messi3", "messi4", "messi5", "messi6", "s1", "s2", "s3", "s4", "cdn1", "cdn2"]
     
     for pref in server_prefixes:
@@ -145,7 +146,16 @@ def generate_server_variants(base_url):
             new_url = urlunparse(parsed._replace(netloc=new_netloc))
             if new_url not in variants:
                 variants.append(new_url)
-                
+
+    # Gestione specifica per la rete IndianServers / EmbedIndia
+    if "indianservers" in netloc or "embedindia" in netloc:
+        for indian_prefix in ["shiva", "brahma", "vishnu", "indra"]:
+            domain_parts = netloc.split(".")
+            new_netloc = f"{indian_prefix}.{'.'.join(domain_parts[1:])}"
+            new_url = urlunparse(parsed._replace(netloc=new_netloc))
+            if new_url not in variants:
+                variants.append(new_url)
+
     return variants
 
 # ==========================================
@@ -168,16 +178,16 @@ def resolve_damitv_stream(damitv_id):
         match_id = clean_id.split('/')[-1] if '/' in clean_id else clean_id
 
         session = requests.Session()
-        session.headers.update(HEADERS_DAMITV)
-
+        
+        # Token e sessione dinamica
         token = ""
         expire = ""
         try:
-            r_sess = session.get("https://damitv.st/papi/ad-session", timeout=5)
+            r_sess = session.get("https://damitv.st/papi/ad-session", headers=HEADERS_DAMITV, timeout=5)
             if r_sess.status_code == 200:
                 sid = r_sess.json().get("s", "")
                 if sid:
-                    r_ver = session.get(f"https://damitv.st/papi/ad-verify?s={sid}", timeout=5)
+                    r_ver = session.get(f"https://damitv.st/papi/ad-verify?s={sid}", headers=HEADERS_DAMITV, timeout=5)
                     if r_ver.status_code == 200:
                         data_ver = r_ver.json()
                         token = data_ver.get("t", "")
@@ -185,36 +195,36 @@ def resolve_damitv_stream(damitv_id):
         except Exception as e:
             print(f"[DAMITV TOKEN WARN] {e}")
 
+        # Tenta prima l'estrazione completa dall'API extract-url
+        extract_urls = [
+            f"https://damitv.st/papi/extract-url/{clean_id}",
+            f"https://damitv.st/papi/extract-url/{match_id}"
+        ]
+
+        for ext_url in extract_urls:
+            r_ext = session.get(ext_url, headers=HEADERS_DAMITV, timeout=5)
+            if r_ext.status_code == 200:
+                data = r_ext.json()
+                if data.get("success"):
+                    candidates = extract_all_urls_from_json(data)
+                    all_to_test = []
+                    for cand in list(dict.fromkeys(candidates)):
+                        all_to_test.extend(generate_server_variants(cand))
+                    
+                    for stream_url in list(dict.fromkeys(all_to_test)):
+                        if verify_stream_health(stream_url, session):
+                            print(f"[SUCCESS STREAM FOUND]: {stream_url}")
+                            return stream_url
+
+        # Fallback su endpoint diretti se l'API extract-url non restituisce link validi
         if clean_id.isdigit() and token:
-            direct_live_url = f"https://messi.damitv.st/papi/tv/live/{clean_id}.m3u8?tk={token}&e={expire}"
-            if verify_stream_health(direct_live_url, session):
-                return direct_live_url
-
-        extract_url = f"https://damitv.st/papi/extract-url/{clean_id}"
-        r_ext = session.get(extract_url, timeout=5)
-        
-        if r_ext.status_code != 200 and match_id != clean_id:
-            extract_url = f"https://damitv.st/papi/extract-url/{match_id}"
-            r_ext = session.get(extract_url, timeout=5)
-
-        if r_ext.status_code == 200:
-            data = r_ext.json()
-            if data.get("success"):
-                candidates = extract_all_urls_from_json(data)
-                unique_candidates = list(dict.fromkeys(candidates))
-
-                all_to_test = []
-                for cand in unique_candidates:
-                    all_to_test.extend(generate_server_variants(cand))
-                
-                all_to_test = list(dict.fromkeys(all_to_test))
-
-                for stream_url in all_to_test:
-                    if verify_stream_health(stream_url, session):
-                        print(f"[SUCCESS STREAM FOUND]: {stream_url}")
-                        return stream_url
-                    else:
-                        print(f"[DEAD/404 STREAM]: {stream_url}")
+            fallback_urls = [
+                f"https://messi.damitv.st/papi/tv/live/{clean_id}.m3u8?tk={token}&e={expire}",
+                f"https://shiva.indianservers.st/secure/{token}/{expire}/{clean_id}/tracks-v1a1/mono.ts.m3u8"
+            ]
+            for fb_url in fallback_urls:
+                if verify_stream_health(fb_url, session):
+                    return fb_url
 
     except Exception as e:
         print(f"[DAMITV RESOLVE ERROR] {e}")
@@ -229,10 +239,12 @@ def find_damitv_match_by_team(team_key):
         for kw in keywords:
             candidates = [
                 f"ucl/{today_str}/{kw}",
+                f"ucl_{kw}",
                 f"seriea/{today_str}/{kw}",
                 f"coppaitalia/{today_str}/{kw}",
                 f"event/{kw}",
-                f"live/{kw}"
+                f"live/{kw}",
+                kw
             ]
             for cand in candidates:
                 stream_url = resolve_damitv_stream(cand)
@@ -242,7 +254,6 @@ def find_damitv_match_by_team(team_key):
     except Exception as e:
         print(f"[SCRAPER ERROR] {team_key}: {e}")
     return None
-
 # ==========================================
 # ROTTE FLASK
 # ==========================================
