@@ -99,10 +99,13 @@ def verify_stream_health(url, session=None):
     try:
         s = session or requests
         r = s.get(url, headers=HEADERS_DAMITV, timeout=4, stream=True)
-        return r.status_code == 200
+        if r.status_code == 200:
+            chunk = next(r.iter_content(chunk_size=512), b"").decode('utf-8', errors='ignore')
+            if "#EXTM3U" in chunk or "#EXT-X-" in chunk or ".ts" in chunk:
+                return True
+        return False
     except Exception:
         return False
-
 def resolve_tvnow_stream(stream_id):
     try:
         api_url = f"https://chat.cfbu247.sbs/api/resolve-dlstream/{stream_id}"
