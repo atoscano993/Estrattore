@@ -17,10 +17,8 @@ HEADERS_TVNOW = {
     "Origin": "https://tvnow247.top"
 }
 
-HEADERS_DAMITV = {
+HEADERS_BASE = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Referer": "https://embedindia.st/",
-    "Origin": "https://embedindia.st",
     "Accept": "*/*",
     "Sec-Fetch-Dest": "empty",
     "Sec-Fetch-Mode": "cors",
@@ -103,16 +101,23 @@ SERIE_A_TEAMS = {
 }
 
 # ==========================================
-# UTILITY E ESTRAZIONE STATO STREAM
+# UTILITY STREAM
 # ==========================================
-def verify_stream_health(url, session=None):
+def verify_stream_health(url, session):
     try:
-        s = session or requests
-        # allow_redirects=True gestisce direttamente i reindirizzamenti 302 visti nei log
-        r = s.get(url, headers=HEADERS_DAMITV, timeout=4, stream=True, allow_redirects=True)
+        parsed = urlparse(url)
+        headers = HEADERS_BASE.copy()
+        if "indianservers" in parsed.netloc or "embedindia" in parsed.netloc:
+            headers["Referer"] = "https://embedindia.st/"
+            headers["Origin"] = "https://embedindia.st"
+        else:
+            headers["Referer"] = "https://damitv.st/"
+            headers["Origin"] = "https://damitv.st"
+
+        r = session.get(url, headers=headers, timeout=4, stream=True, allow_redirects=True)
         if r.status_code == 200:
             chunk = next(r.iter_content(chunk_size=512), b"").decode('utf-8', errors='ignore')
-            if "#EXTM3U" in chunk or "#EXT-X-" in chunk or ".ts" in chunk:
+            if "#EXTM3U" in chunk or "#EXT-X-" in chunk or ".ts" in chunk or len(chunk) > 20:
                 return True
         return False
     except Exception:
@@ -136,30 +141,18 @@ def generate_server_variants(base_url):
     parsed = urlparse(base_url)
     netloc = parsed.netloc
 
-    # Prefissi per i server classici DamiTV
-    server_prefixes = ["messi1", "messi2", "messi3", "messi4", "messi5", "messi6", "s1", "s2", "s3", "s4", "cdn1", "cdn2"]
-    
-    for pref in server_prefixes:
+    prefixes = ["shiva", "netanyahu", "brahma", "vishnu", "messi1", "messi2", "messi3", "s1", "s2"]
+    for pref in prefixes:
         if "." in netloc:
             domain_parts = netloc.split(".")
             new_netloc = f"{pref}.{'.'.join(domain_parts[1:])}"
             new_url = urlunparse(parsed._replace(netloc=new_netloc))
             if new_url not in variants:
                 variants.append(new_url)
-
-    # Gestione specifica per la rete IndianServers / EmbedIndia
-    if "indianservers" in netloc or "embedindia" in netloc:
-        for indian_prefix in ["shiva", "brahma", "vishnu", "indra"]:
-            domain_parts = netloc.split(".")
-            new_netloc = f"{indian_prefix}.{'.'.join(domain_parts[1:])}"
-            new_url = urlunparse(parsed._replace(netloc=new_netloc))
-            if new_url not in variants:
-                variants.append(new_url)
-
     return variants
 
 # ==========================================
-# FUNZIONI DI RESOLUTION CON FAILOVER
+# RESOLVER CORE
 # ==========================================
 def resolve_tvnow_stream(stream_id):
     try:
@@ -169,97 +162,89 @@ def resolve_tvnow_stream(stream_id):
             data = response.json()
             return data.get("m3u8") or data.get("proxyPlaylistUrl")
     except Exception as e:
-        print(f"[TVNOW ERROR] ID {stream_id}: {e}")
+        print(f"[TVNOW ERROR] {e}")
     return None
 
 def resolve_damitv_stream(damitv_id):
     try:
         clean_id = damitv_id.lstrip('/')
-        match_id = clean_id.split('/')[-1] if '/' in clean_id else clean_id
-
         session = requests.Session()
         
-        # Token e sessione dinamica
-        token = ""
-        expire = ""
+        headers_damitv = HEADERS_BASE.copy()
+        headers_damitv["Referer"] = "https://damitv.st/"
+        headers_damitv["Origin"] = "https://damitv.st"
+        session.headers.update(headers_damitv)
+
+        # 1. Inizializzazione sessione e token
+        token, expire = "", ""
         try:
-            r_sess = session.get("https://damitv.st/papi/ad-session", headers=HEADERS_DAMITV, timeout=5)
+            r_sess = session.get("https://damitv.st/papi/ad-session", timeout=4)
             if r_sess.status_code == 200:
                 sid = r_sess.json().get("s", "")
                 if sid:
-                    r_ver = session.get(f"https://damitv.st/papi/ad-verify?s={sid}", headers=HEADERS_DAMITV, timeout=5)
+                    r_ver = session.get(f"https://damitv.st/papi/ad-verify?s={sid}", timeout=4)
                     if r_ver.status_code == 200:
-                        data_ver = r_ver.json()
-                        token = data_ver.get("t", "")
-                        expire = data_ver.get("e", "")
+                        data_v = r_ver.json()
+                        token = data_v.get("t", "")
+                        expire = data_v.get("e", "")
         except Exception as e:
-            print(f"[DAMITV TOKEN WARN] {e}")
+            print(f"[TOKEN WARN] {e}")
 
-        # Tenta prima l'estrazione completa dall'API extract-url
+        # 2. Interrogazione API Extract URL
         extract_urls = [
             f"https://damitv.st/papi/extract-url/{clean_id}",
-            f"https://damitv.st/papi/extract-url/{match_id}"
+            f"https://damitv.st/papi/extract-url/event/{clean_id}"
         ]
 
+        found_candidates = []
         for ext_url in extract_urls:
-            r_ext = session.get(ext_url, headers=HEADERS_DAMITV, timeout=5)
-            if r_ext.status_code == 200:
-                data = r_ext.json()
-                if data.get("success"):
-                    candidates = extract_all_urls_from_json(data)
-                    all_to_test = []
-                    for cand in list(dict.fromkeys(candidates)):
-                        all_to_test.extend(generate_server_variants(cand))
-                    
-                    for stream_url in list(dict.fromkeys(all_to_test)):
-                        if verify_stream_health(stream_url, session):
-                            print(f"[SUCCESS STREAM FOUND]: {stream_url}")
-                            return stream_url
+            try:
+                r_ext = session.get(ext_url, timeout=4)
+                if r_ext.status_code == 200:
+                    data = r_ext.json()
+                    if data.get("success"):
+                        extracted = extract_all_urls_from_json(data)
+                        found_candidates.extend(extracted)
+            except Exception:
+                pass
 
-        # Fallback su endpoint diretti se l'API extract-url non restituisce link validi
-        if clean_id.isdigit() and token:
-            fallback_urls = [
-                f"https://messi.damitv.st/papi/tv/live/{clean_id}.m3u8?tk={token}&e={expire}",
-                f"https://shiva.indianservers.st/secure/{token}/{expire}/{clean_id}/tracks-v1a1/mono.ts.m3u8"
-            ]
-            for fb_url in fallback_urls:
-                if verify_stream_health(fb_url, session):
-                    return fb_url
+        # 3. Se non trova link JSON, genera le strutture dinamiche usate da IndianServers
+        if not found_candidates and token and expire:
+            event_name = clean_id.split('/')[-1]
+            found_candidates.extend([
+                f"https://shiva.indianservers.st/secure/{token}/{expire}/1788969600/{event_name}/tracks-v1a1/mono.ts.m3u8",
+                f"https://netanyahu.indianservers.st/secure/{token}/{expire}/1788969600/{event_name}/tracks-v1a1/mono.ts.m3u8",
+                f"https://messi.damitv.st/papi/tv/live/{clean_id}.m3u8?tk={token}&e={expire}"
+            ])
+
+        # 4. Generazione varianti e test health
+        all_to_test = []
+        for cand in list(dict.fromkeys(found_candidates)):
+            all_to_test.extend(generate_server_variants(cand))
+
+        for stream_url in list(dict.fromkeys(all_to_test)):
+            if verify_stream_health(stream_url, session):
+                print(f"[STREAM SUCCESS] {stream_url}")
+                return stream_url
 
     except Exception as e:
-        print(f"[DAMITV RESOLVE ERROR] {e}")
-    
+        print(f"[RESOLVE ERROR] {e}")
     return None
 
 def find_damitv_match_by_team(team_key):
-    try:
-        keywords = SERIE_A_TEAMS.get(team_key, [team_key])
-        today_str = datetime.now().strftime('%Y-%m-%d')
-
-        for kw in keywords:
-            candidates = [
-                f"ucl/{today_str}/{kw}",
-                f"ucl_{kw}",
-                f"seriea/{today_str}/{kw}",
-                f"coppaitalia/{today_str}/{kw}",
-                f"event/{kw}",
-                f"live/{kw}",
-                kw
-            ]
-            for cand in candidates:
-                stream_url = resolve_damitv_stream(cand)
-                if stream_url:
-                    return stream_url
-
-    except Exception as e:
-        print(f"[SCRAPER ERROR] {team_key}: {e}")
+    keywords = SERIE_A_TEAMS.get(team_key, [team_key])
+    for kw in keywords:
+        stream_url = resolve_damitv_stream(kw)
+        if stream_url:
+            return stream_url
     return None
+
 # ==========================================
 # ROTTE FLASK
 # ==========================================
 @app.route('/')
 def home():
-    return "Estrattore attivo con Failover Automatico (TVNow + DamITV)", 200
+    return "Proxy multi-server attivo.", 200
 
 @app.route('/proxy')
 def proxy_m3u8():
@@ -267,33 +252,25 @@ def proxy_m3u8():
     if not target_url:
         return "URL mancante", 400
     
-    # Determina dinamicamente i Referer in base all'host target
-    parsed_target = urlparse(target_url)
-    referer = "https://embedindia.st/"
-    origin = "https://embedindia.st"
+    parsed = urlparse(target_url)
+    headers = HEADERS_BASE.copy()
     
-    if "damitv" in parsed_target.netloc:
-        referer = "https://damitv.st/"
-        origin = "https://damitv.st"
-
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Referer": referer,
-        "Origin": origin,
-        "Accept": "*/*",
-        "Sec-Fetch-Dest": "empty",
-        "Sec-Fetch-Mode": "cors",
-        "Sec-Fetch-Site": "cross-site"
-    }
+    # Referer dinamico indispensabile per indianservers/embedindia
+    if "indianservers" in parsed.netloc or "embedindia" in parsed.netloc or "workers.dev" in parsed.netloc:
+        headers["Referer"] = "https://embedindia.st/"
+        headers["Origin"] = "https://embedindia.st"
+    else:
+        headers["Referer"] = "https://damitv.st/"
+        headers["Origin"] = "https://damitv.st"
 
     try:
-        res = requests.get(target_url, headers=headers, timeout=12, stream=True, allow_redirects=True)
+        res = requests.get(target_url, headers=headers, timeout=10, stream=True, allow_redirects=True)
         final_url = res.url
 
         if res.status_code == 200:
             content_type = res.headers.get('Content-Type', '')
             
-            # Riconosce sia file .m3u8 che risposte M3U8 mascherate da text/plain (come nello screenshot)
+            # Intercetta playlist HLS anche se restituite come text/plain
             if ".m3u8" in final_url or "mpegurl" in content_type or "apple" in content_type or target_url.endswith(".m3u8"):
                 lines = res.text.splitlines()
                 new_lines = []
@@ -308,14 +285,13 @@ def proxy_m3u8():
                 rewritten_m3u8 = "\n".join(new_lines)
                 response = Response(rewritten_m3u8, mimetype='application/vnd.apple.mpegurl')
                 response.headers["Access-Control-Allow-Origin"] = "*"
-                response.headers["Access-Control-Allow-Headers"] = "*"
                 return response
             
             response = Response(res.iter_content(chunk_size=1024*64), content_type=content_type or 'video/mp2t')
             response.headers["Access-Control-Allow-Origin"] = "*"
             return response
         else:
-            return f"Errore remoto: {res.status_code}", res.status_code
+            return f"Errore server sorgente: {res.status_code}", res.status_code
     except Exception as e:
         return f"Errore Proxy: {e}", 500
 
@@ -325,7 +301,7 @@ def get_direct_event(event_slug):
     stream_url = resolve_damitv_stream(clean_slug)
     if stream_url:
         return redirect(f"/proxy?url={requests.utils.quote(stream_url)}", code=302)
-    return f"Impossibile estrarre lo stream per '{clean_slug}'", 404
+    return f"Nessun evento attivo per '{clean_slug}'", 404
 
 @app.route('/<channel_name>')
 def get_stream(channel_name):
@@ -342,15 +318,6 @@ def get_stream(channel_name):
             tvnow_url = resolve_tvnow_stream(ch_info["tvnow_id"])
             if tvnow_url:
                 return redirect(tvnow_url, code=302)
-        if ch_info.get("damitv_id"):
-            damitv_url = resolve_damitv_stream(ch_info["damitv_id"])
-            if damitv_url:
-                return redirect(f"/proxy?url={requests.utils.quote(damitv_url)}", code=302)
-
-    if name_clean.isdigit():
-        direct_url = resolve_tvnow_stream(name_clean)
-        if direct_url:
-            return redirect(direct_url, code=302)
 
     return f"Nessun evento disponibile per '{channel_name}'", 503
 
