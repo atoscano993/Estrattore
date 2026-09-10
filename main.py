@@ -155,15 +155,11 @@ def verify_stream_health(url, session):
 def generate_full_test_urls(slug, token="", expire=""):
     today_str = datetime.now().strftime('%Y-%m-%d')
     
-    # Domini base inclusi i nodi futtv, indianservers e messi
+    # Priorità ai domini che rispondono 200 senza blocchi da Render
     base_domains = [
-        "india.futtv.nx.kg",
-        "futtv.nx.kg",
         "messi.damitv.st",
-        "shiva.indianservers.st",
-        "netanyahu.indianservers.st",
         "damitv.st",
-        "embedindia.st"
+        "india.futtv.nx.kg"
     ]
     
     paths = [
