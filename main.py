@@ -2,8 +2,9 @@ import os
 import re
 import requests
 from datetime import datetime
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 from flask import Flask, redirect, Response, request
+from fp.fp import FreeProxy
 
 app = Flask(__name__)
 
@@ -45,30 +46,30 @@ SERIE_A_TEAMS = {
     "atalanta": ["atalanta", "ata"],
     "bologna": ["bologna", "bol"],
     "cagliari": ["cagliari", "cag"],
-"como": [
+    "como": [
         "como", "com",
-        "com-rbl", "rbl-com", "com-lei", "lei-com", # Leipzig
-        "fey-com", "com-fey", # Feyenoord
-        "com-mun", "mun-com", # Manchester United
-        "len-com", "com-len", # Lens
-        "com-aek", "aek-com", # AEK Athens
-        "bet-com", "com-bet", # Real Betis
-        "com-psg", "psg-com", # Paris Saint-Germain
-        "bar-com", "com-bar"  # Barcelona
+        "com-rbl", "rbl-com", "com-lei", "lei-com",
+        "fey-com", "com-fey",
+        "com-mun", "mun-com",
+        "len-com", "com-len",
+        "com-aek", "aek-com",
+        "bet-com", "com-bet",
+        "com-psg", "psg-com",
+        "bar-com", "com-bar"
     ],
     "fiorentina": ["fiorentina", "fio"],
     "frosinone": ["frosinone", "fro"],
     "genoa": ["genoa", "gen"],
     "inter": [
         "inter", "int", 
-        "rma-int", "int-rma", # Real Madrid
-        "int-bru", "bru-int", # Club Brugge
-        "int-shk", "shk-int", # Shakhtar Donetsk
-        "fey-int", "int-fey", # Feyenoord
-        "int-stu", "stu-int", # Stuttgart
-        "bvb-int", "int-bvb", "dor-int", "int-dor", # Borussia Dortmund
-        "int-liv", "liv-int", # Liverpool
-        "slo-int", "int-slo"  # Slovan Bratislava
+        "rma-int", "int-rma",
+        "int-bru", "bru-int",
+        "int-shk", "shk-int",
+        "fey-int", "int-fey",
+        "int-stu", "stu-int",
+        "bvb-int", "int-bvb", "dor-int", "int-dor",
+        "int-liv", "liv-int",
+        "slo-int", "int-slo"
     ],
     "juventus": ["juventus", "juve", "juv"],
     "lazio": ["lazio", "laz"],
@@ -77,26 +78,26 @@ SERIE_A_TEAMS = {
     "monza": ["monza", "mon"],
     "napoli": [
         "napoli", "nap",
-        "nap-ars", "ars-nap", # Arsenal
-        "vil-nap", "nap-vil", # Villarreal
-        "nap-bod", "bod-nap", # Bodø/Glimt
-        "por-nap", "nap-por", # Porto
-        "mci-nap", "nap-mci", # Manchester City
-        "nap-bru", "bru-nap", # Club Brugge
-        "sab-nap", "nap-sab", # Sabah
-        "nap-vik", "vik-nap"  # Viking
+        "nap-ars", "ars-nap",
+        "vil-nap", "nap-vil",
+        "nap-bod", "bod-nap",
+        "por-nap", "nap-por",
+        "mci-nap", "nap-mci",
+        "nap-bru", "bru-nap",
+        "sab-nap", "nap-sab",
+        "nap-vik", "vik-nap"
     ],
     "parma": ["parma", "par"],
-"roma": [
+    "roma": [
         "roma", "rom",
-        "fen-rom", "rom-fen", # Fenerbahçe
-        "rom-rma", "rma-rom", # Real Madrid
-        "rom-slo", "slo-rom", # Slovan Bratislava
-        "mun-rom", "rom-mun", # Manchester United
-        "psg-rom", "rom-psg", # Paris Saint-Germain
-        "rom-spo", "spo-rom", "rom-scp", "scp-rom", # Sporting CP
-        "aek-rom", "rom-aek", # AEK Athens
-        "rom-lil", "lil-rom"  # Lille
+        "fen-rom", "rom-fen",
+        "rom-rma", "rma-rom",
+        "rom-slo", "slo-rom",
+        "mun-rom", "rom-mun",
+        "psg-rom", "rom-psg",
+        "rom-spo", "spo-rom", "rom-scp", "scp-rom",
+        "aek-rom", "rom-aek",
+        "rom-lil", "lil-rom"
     ],
     "sassuolo": ["sassuolo", "sas"],
     "torino": ["torino", "tor"],
@@ -105,20 +106,42 @@ SERIE_A_TEAMS = {
 }
 
 # ==========================================
-# UTILITY STREAM
+# UTILITY PROXY E STREAM
 # ==========================================
+
+def get_working_proxy():
+    """Trova un proxy HTTP attivo per superare i blocchi IP del Cloud"""
+    try:
+        proxy_url = FreeProxy(country_id=['IT', 'DE', 'FR', 'NL'], https=True, timeout=2).get()
+        return {"http": proxy_url, "https": proxy_url}
+    except Exception as e:
+        print(f"[PROXY FETCH ERROR] Nessun proxy trovato: {e}")
+        return None
+
 def verify_stream_health(url, session):
     try:
         parsed = urlparse(url)
         headers = HEADERS_BASE.copy()
-        if any(domain in parsed.netloc for domain in ["futtv", "indianservers", "embedindia", "workers.dev"]):
+        
+        is_restricted = any(domain in parsed.netloc for domain in ["futtv", "indianservers", "embedindia", "workers.dev"])
+        
+        if is_restricted:
              headers["Referer"] = "https://embedindia.st/"
              headers["Origin"] = "https://embedindia.st"
         else:
             headers["Referer"] = "https://damitv.st/"
             headers["Origin"] = "https://damitv.st"
 
-        r = session.get(url, headers=headers, timeout=6, stream=True, allow_redirects=True)
+        # Tenta prima la chiamata diretta
+        r = session.get(url, headers=headers, timeout=5, stream=True, allow_redirects=True)
+        
+        # Se riceve 403 sui domini restrittivi, ritenta passando da un Proxy
+        if r.status_code == 403 and is_restricted:
+            print(f"[PROXY TRIGGER] 403 Rilevato su {parsed.netloc}. Tentativo con Proxy...")
+            proxy = get_working_proxy()
+            if proxy:
+                r = requests.get(url, headers=headers, proxies=proxy, timeout=5, stream=True, allow_redirects=True)
+
         print(f"[CHECK] {url} -> Status: {r.status_code}")
         
         if r.status_code == 200:
@@ -132,17 +155,19 @@ def verify_stream_health(url, session):
 def generate_full_test_urls(slug, token="", expire=""):
     today_str = datetime.now().strftime('%Y-%m-%d')
     
-    # Domini base inclusi i nuovi nodi futtv e messi
+    # Domini base inclusi i nodi futtv, indianservers e messi
     base_domains = [
         "india.futtv.nx.kg",
         "futtv.nx.kg",
         "messi.damitv.st",
+        "shiva.indianservers.st",
+        "netanyahu.indianservers.st",
         "damitv.st",
         "embedindia.st"
     ]
     
     paths = [
-        f"{slug}/tracks-v1a1/mono.m3u8",        # Pattern esatto scoperto nello screenshot
+        f"{slug}/tracks-v1a1/mono.m3u8",
         f"{slug}/tracks-v1a1/mono.ts.m3u8",
         f"ucl/{today_str}/{slug}/mono.m3u8",
         f"ucl/{today_str}/{slug}/tracks-v1a1/mono.m3u8",
@@ -205,9 +230,46 @@ def resolve_tvnow_stream(stream_id):
         pass
     return None
 
+# ==========================================
+# ROTTE FLASK
+# ==========================================
+
 @app.route('/')
 def home():
     return "Proxy attivo e pronto.", 200
+
+@app.route('/debug/<path:slug>')
+def debug_slug(slug):
+    """Rotta per verificare in diretta quali server rispondono 200 o 403"""
+    clean_slug = slug.replace(".m3u8", "")
+    session = requests.Session()
+    urls_to_test = generate_full_test_urls(clean_slug)
+    
+    report = [f"=== TEST DIAGNOSTICO PER SLUG: '{clean_slug}' ==="]
+    
+    for url in urls_to_test:
+        parsed = urlparse(url)
+        headers = HEADERS_BASE.copy()
+        is_restricted = any(domain in parsed.netloc for domain in ["futtv", "indianservers", "embedindia"])
+        headers["Referer"] = "https://embedindia.st/" if is_restricted else "https://damitv.st/"
+        
+        try:
+            r = session.get(url, headers=headers, timeout=3, stream=True)
+            status = r.status_code
+            
+            if status == 403 and is_restricted:
+                proxy = get_working_proxy()
+                if proxy:
+                    r_proxy = requests.get(url, headers=headers, proxies=proxy, timeout=4, stream=True)
+                    report.append(f"[PROXY TEST] {url} -> Diretto: 403 | Con Proxy: {r_proxy.status_code}")
+                else:
+                    report.append(f"[BLOCCATO 403] {url} (Nessun proxy disponibile)")
+            else:
+                report.append(f"[STATUS {status}] -> {url}")
+        except Exception as e:
+            report.append(f"[FAIL] -> {url} ({e})")
+            
+    return "<br>".join(report), 200
 
 @app.route('/proxy')
 def proxy_m3u8():
