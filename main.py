@@ -26,28 +26,40 @@ AUTOMATIC_CHANNELS = {
 def resolve_dlive_stream(stream_id):
     """Estrae l'URL m3u8 direttamente dalla pagina dello stream dlive"""
     try:
-        # Step 1: Chiamata a stream-ID.php
         target_url = f"https://dlive.sx/stream-{stream_id}.php"
-        res = requests.get(target_url, headers=HEADERS, timeout=5)
+        print(f"[DEBUG] Richiesta a: {target_url}")
+        
+        res = requests.get(target_url, headers=HEADERS, timeout=8)
+        print(f"[DEBUG] Status Code: {res.status_code}")
+        print(f"[DEBUG] Primi 300 caratteri risposta: {res.text[:300]}")
         
         if res.status_code == 200:
-            # Cerca qualsiasi URL m3u8 presente nel codice HTML/JS
+            # 1. Cerca direttamente l'm3u8
             match = re.search(r'https?://[^\s\'"]+\.m3u8[^\s\'"]*', res.text)
             if match:
                 return match.group(0)
             
-            # Step 2: Se c'è un iframe (es. barecrop), estrae il link del player
-            iframe_match = re.search(r'src=["\']([^"\']+)["\']', res.text)
-            if iframe_match:
-                iframe_url = iframe_match.group(1)
-                if iframe_url.startswith('//'):
-                    iframe_url = 'https:' + iframe_url
-                
-                # Legge l'iframe per trovare l'm3u8
-                res_iframe = requests.get(iframe_url, headers={"User-Agent": HEADERS["User-Agent"], "Referer": target_url}, timeout=5)
-                m3u8_match = re.search(r'https?://[^\s\'"]+\.m3u8[^\s\'"]*', res_iframe.text)
-                if m3u8_match:
-                    return m3u8_match.group(0)
+            # 2. Cerca eventuali iframe nell'HTML
+            iframe_matches = re.findall(r'src=["\']([^"\']+)["\']', res.text)
+            print(f"[DEBUG] Iframe trovati: {iframe_matches}")
+            
+            for iframe_url in iframe_matches:
+                if "http" not in iframe_url:
+                    if iframe_url.startswith('//'):
+                        iframe_url = 'https:' + iframe_url
+                    elif iframe_url.startswith('/'):
+                        iframe_url = 'https://dlive.sx' + iframe_url
+                    else:
+                        iframe_url = 'https://dlive.sx/' + iframe_url
+
+                print(f"[DEBUG] Analizzo iframe: {iframe_url}")
+                try:
+                    res_iframe = requests.get(iframe_url, headers={"User-Agent": HEADERS["User-Agent"], "Referer": target_url}, timeout=8)
+                    m3u8_match = re.search(r'https?://[^\s\'"]+\.m3u8[^\s\'"]*', res_iframe.text)
+                    if m3u8_match:
+                        return m3u8_match.group(0)
+                except Exception as err_iframe:
+                    print(f"[DEBUG] Errore iframe {iframe_url}: {err_iframe}")
 
     except Exception as e:
         print(f"[DLIVE SCRAPE ERROR] ID {stream_id}: {e}")
