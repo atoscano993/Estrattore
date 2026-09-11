@@ -65,6 +65,19 @@ def resolve_dlive_stream(stream_id):
         print(f"[DLIVE SCRAPE ERROR] ID {stream_id}: {e}")
     return None
 
+@app.route('/test-fetch/<stream_id>')
+def test_fetch(stream_id):
+    target_url = f"https://dlive.sx/stream-{stream_id}.php"
+    try:
+        res = requests.get(target_url, headers=HEADERS, timeout=5)
+        return {
+            "status_code": res.status_code,
+            "headers": dict(res.headers),
+            "html_preview": res.text[:500]
+        }
+    except Exception as e:
+        return {"error": str(e)}, 500
+
 @app.after_request
 def add_header(response):
     response.headers['Access-Control-Allow-Origin'] = '*'
